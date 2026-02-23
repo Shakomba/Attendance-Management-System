@@ -1,0 +1,167 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: ams_sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+      MSSQL_TCP_PORT: "1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    ports:
+      - "${SQL_PORT_HOST:-1433}:1433"
+    networks:
+      - ams_net
+
+  # Run once when you need to (re)initialize schema:
+  # docker compose -f docker-compose.yml --profile db-init up sql-init
+  sql-init:
+    image: mcr.microsoft.com/mssql-tools18
+    container_name: ams_sql_init
+    profiles: ["db-init"]
+    depends_on:
+      - sqlserver
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+    volumes:
+      - ./database:/scripts:ro
+    command: >
+      /bin/bash -lc "
+      set -e;
+      for i in {1..60}; do
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" && break;
+        echo 'Waiting for SQL Server...';
+        sleep 5;
+      done;
+      /opt/mssql-tools18/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -i /scripts/01_init_schema.sql;
+      echo 'Schema init completed.';
+      "
+    networks:
+      - ams_net
+
+  backend:
+    container_name: ams_backend
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        ENV PYTHONDONTWRITEBYTECODE=1
+        ENV PYTHONUNBUFFERED=1
+        ENV DEBIAN_FRONTEND=noninteractive
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            curl ca-certificates gnupg2 \
+            unixodbc unixodbc-dev \
+            gcc g++ build-essential cmake \
+            libgl1 libglib2.0-0 libgomp1 \
+          && rm -rf /var/lib/apt/lists/*
+
+        RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+          && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+            > /etc/apt/sources.list.d/mssql-release.list \
+          && apt-get update \
+          && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+          && rm -rf /var/lib/apt/lists/*
+
+        WORKDIR /app
+        COPY backend/requirements.txt /tmp/requirements.txt
+        RUN pip install --upgrade pip && pip install --no-cache-dir -r /tmp/requirements.txt
+        COPY backend /app
+
+        EXPOSE 8000
+        CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - sqlserver
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.example.com,http://localhost:5173}
+
+      DEMO_MODE: "false"
+      SQL_DRIVER: "ODBC Driver 18 for SQL Server"
+      SQL_SERVER: "sqlserver"
+      SQL_PORT: "1433"
+      SQL_DATABASE: ${SQL_DATABASE:-AttendanceAI}
+      SQL_USER: "sa"
+      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+      SQL_TRUST_SERVER_CERT: "yes"
+
+      # Set AI_MODE=cpu if you want CPU-only operation.
+      AI_MODE: ${AI_MODE:-gpu}
+      CPU_FACE_DETECT_MODEL: ${CPU_FACE_DETECT_MODEL:-hog}
+      CPU_DISTANCE_THRESHOLD: ${CPU_DISTANCE_THRESHOLD:-0.45}
+      GPU_COSINE_THRESHOLD: ${GPU_COSINE_THRESHOLD:-0.55}
+      RECOGNITION_FRAME_STRIDE: ${RECOGNITION_FRAME_STRIDE:-8}
+      RECOGNITION_EVENT_COOLDOWN_SEC: ${RECOGNITION_EVENT_COOLDOWN_SEC:-20}
+
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-Attendance Bot <no-reply@example.com>}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_DRY_RUN: ${SMTP_DRY_RUN:-true}
+
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility,video"
+    gpus: all
+    volumes:
+      - ./student_photos:/app/student_photos
+    ports:
+      - "${API_PORT_HOST:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+    networks:
+      - ams_net
+
+  frontend:
+    container_name: ams_frontend
+    restart: unless-stopped
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.example.com}
+      dockerfile_inline: |
+        FROM node:20-alpine AS build
+        WORKDIR /app
+        COPY frontend/package*.json ./
+        RUN npm ci
+        COPY frontend/. .
+        ARG VITE_API_BASE_URL
+        ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+        RUN npm run build
+
+        FROM nginx:1.27-alpine
+        COPY --from=build /app/dist /usr/share/nginx/html
+        EXPOSE 80
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT_HOST:-5173}:80"
+    networks:
+      - ams_net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ams_cloudflared
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    networks:
+      - ams_net
+
+volumes:
+  mssql_data:
+
+networks:
+  ams_net:
+    driver: bridge
