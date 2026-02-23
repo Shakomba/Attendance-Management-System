@@ -6,7 +6,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
       MSSQL_TCP_PORT: "1433"
     volumes:
       - mssql_data:/var/opt/mssql
@@ -24,7 +24,7 @@ services:
     depends_on:
       - sqlserver
     environment:
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
     volumes:
       - ./database:/scripts:ro
     command: >
@@ -79,7 +79,7 @@ services:
     environment:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.example.com,http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.shakomba.org,http://localhost:5173}
 
       DEMO_MODE: "false"
       SQL_DRIVER: "ODBC Driver 18 for SQL Server"
@@ -87,7 +87,7 @@ services:
       SQL_PORT: "1433"
       SQL_DATABASE: ${SQL_DATABASE:-AttendanceAI}
       SQL_USER: "sa"
-      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-ChangeMe_Strong!Passw0rd}
+      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
       SQL_TRUST_SERVER_CERT: "yes"
 
       # Set AI_MODE=cpu if you want CPU-only operation.
@@ -127,7 +127,7 @@ services:
     build:
       context: .
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.example.com}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.shakomba.org}
       dockerfile_inline: |
         FROM node:20-alpine AS build
         WORKDIR /app
@@ -155,7 +155,7 @@ services:
     depends_on:
       - frontend
       - backend
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiMTNkM2Q0NzktZDI5OC00NzIyLThhNTYtZTkxNTIzNjM3M2ZkIiwicyI6Ik5HTm1ZbVpqT0RndE5ESTNZeTAwWWpsakxXSmlOMkl0TnpVeVpHVmlORGRrWXpCayJ9
     networks:
       - ams_net
 
