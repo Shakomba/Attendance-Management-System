@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-const MAX_EVENTS = 140
 const DASH_DRAW_FPS = 18
 const CAMERA_SEND_FPS = 6
 const CAMERA_BUFFER_LIMIT = 1_500_000
@@ -35,17 +34,20 @@ function containRect(sourceW, sourceH, targetW, targetH) {
   return { x: (targetW - w) / 2, y: 0, w, h }
 }
 
-function formatClock(isoLike) {
-  if (!isoLike) return '--'
-  const date = new Date(isoLike)
-  if (Number.isNaN(date.getTime())) return '--'
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function gradeDraftFromRow(row) {
+  return {
+    quiz1: Number(row.Quiz1 ?? 0).toFixed(2),
+    quiz2: Number(row.Quiz2 ?? 0).toFixed(2),
+    project: Number(row.ProjectGrade ?? 0).toFixed(2),
+    assignment: Number(row.AssignmentGrade ?? 0).toFixed(2),
+    midterm: Number(row.MidtermGrade ?? 0).toFixed(2),
+    final_exam: Number(row.FinalExamGrade ?? 0).toFixed(2)
+  }
 }
 
-function levelClass(level) {
-  if (level === 'error') return 'bad'
-  if (level === 'warning') return 'warn'
-  return 'ok'
+function parseGradeValue(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
 }
 
 function StatCard({ label, value, hint }) {
@@ -72,10 +74,12 @@ export default function App() {
   const [sessionId, setSessionId] = useState('')
   const [gradebook, setGradebook] = useState([])
   const [attendance, setAttendance] = useState([])
-  const [events, setEvents] = useState([])
   const [dashboardWsState, setDashboardWsState] = useState('disconnected')
   const [cameraRunning, setCameraRunning] = useState(false)
   const [busy, setBusy] = useState({ loading: false, starting: false, finalizing: false })
+  const [gradeEditor, setGradeEditor] = useState(null)
+  const [gradeBusyByStudent, setGradeBusyByStudent] = useState({})
+  const [attendanceBusyByStudent, setAttendanceBusyByStudent] = useState({})
   const [streamMetrics, setStreamMetrics] = useState({
     incomingFps: 0,
     drawFps: 0,
@@ -85,8 +89,6 @@ export default function App() {
 
   const dashboardWsRef = useRef(null)
   const dashboardPingRef = useRef(null)
-  const attendanceRefreshGateRef = useRef(0)
-
   const cameraWsRef = useRef(null)
   const cameraTimerRef = useRef(null)
   const mediaStreamRef = useRef(null)
@@ -117,19 +119,13 @@ export default function App() {
   })
 
   const appendEvent = useCallback((level, message, details = null) => {
-    setEvents((prev) => {
-      const next = [
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          level,
-          message,
-          details,
-          at: new Date().toISOString()
-        },
-        ...prev
-      ]
-      return next.slice(0, MAX_EVENTS)
-    })
+    if (level === 'error') {
+      console.error(`[dashboard] ${message}`, details || '')
+      return
+    }
+    if (level === 'warning') {
+      console.warn(`[dashboard] ${message}`, details || '')
+    }
   }, [])
 
   const apiFetch = useCallback(
@@ -319,15 +315,43 @@ export default function App() {
     }
   }, [])
 
-  const refreshAttendance = useCallback(async () => {
-    if (!sessionId) return
+  const refreshAttendance = useCallback(async (activeSessionId = null) => {
+    const targetSessionId = activeSessionId || sessionId
+    if (!targetSessionId) return
     try {
-      const data = await apiFetch(`/api/sessions/${sessionId}/attendance`)
+      const data = await apiFetch(`/api/sessions/${targetSessionId}/attendance`)
       setAttendance(data?.items || [])
     } catch (err) {
       appendEvent('warning', `Attendance refresh failed: ${err.message}`)
     }
   }, [apiFetch, appendEvent, sessionId])
+
+  const applyPresenceToAttendance = useCallback((presencePayload) => {
+    const studentId = Number(presencePayload?.student_id)
+    if (!Number.isFinite(studentId)) return
+
+    const eventAt = presencePayload?.recognized_at
+      ? new Date(presencePayload.recognized_at).toISOString()
+      : new Date().toISOString()
+
+    setAttendance((prev) =>
+      prev.map((row) => {
+        if (Number(row.StudentID) !== studentId) return row
+
+        return {
+          ...row,
+          IsPresent: 1,
+          IsLate: presencePayload?.is_late ? 1 : 0,
+          ArrivalDelayMinutes:
+            presencePayload?.arrival_delay_minutes === null || presencePayload?.arrival_delay_minutes === undefined
+              ? row.ArrivalDelayMinutes
+              : Number(presencePayload.arrival_delay_minutes),
+          FirstSeenAt: row.FirstSeenAt || eventAt,
+          LastSeenAt: eventAt
+        }
+      })
+    )
+  }, [])
 
   const loadGradebook = useCallback(async () => {
     if (!courseId) return
@@ -338,6 +362,102 @@ export default function App() {
       appendEvent('warning', `Gradebook load failed: ${err.message}`)
     }
   }, [apiFetch, appendEvent, courseId])
+
+  const startGradeEdit = useCallback((row) => {
+    setGradeEditor({
+      studentId: Number(row.StudentID),
+      fullName: row.FullName,
+      values: gradeDraftFromRow(row)
+    })
+  }, [])
+
+  const cancelGradeEdit = useCallback(() => {
+    setGradeEditor(null)
+  }, [])
+
+  const updateGradeDraftField = useCallback((field, value) => {
+    setGradeEditor((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        values: {
+          ...prev.values,
+          [field]: value
+        }
+      }
+    })
+  }, [])
+
+  const saveGradeEdit = useCallback(
+    async (studentId) => {
+      if (!courseId || !gradeEditor || Number(gradeEditor.studentId) !== Number(studentId)) return
+
+      const payload = {
+        quiz1: parseGradeValue(gradeEditor.values.quiz1),
+        quiz2: parseGradeValue(gradeEditor.values.quiz2),
+        project: parseGradeValue(gradeEditor.values.project),
+        assignment: parseGradeValue(gradeEditor.values.assignment),
+        midterm: parseGradeValue(gradeEditor.values.midterm),
+        final_exam: parseGradeValue(gradeEditor.values.final_exam)
+      }
+
+      setGradeBusyByStudent((prev) => ({ ...prev, [studentId]: true }))
+      try {
+        const result = await apiFetch(`/api/courses/${courseId}/students/${studentId}/grades`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        })
+
+        const updatedRow = result?.data
+        if (updatedRow) {
+          setGradebook((prev) =>
+            prev.map((row) => (Number(row.StudentID) === Number(studentId) ? updatedRow : row))
+          )
+        } else {
+          await loadGradebook()
+        }
+
+        appendEvent('success', `Grades updated for ${gradeEditor.fullName || `Student ${studentId}`}`)
+        setGradeEditor(null)
+      } catch (err) {
+        appendEvent('error', `Manual grade update failed: ${err.message}`)
+      } finally {
+        setGradeBusyByStudent((prev) => ({ ...prev, [studentId]: false }))
+      }
+    },
+    [apiFetch, appendEvent, courseId, gradeEditor, loadGradebook]
+  )
+
+  const markManualAttendance = useCallback(
+    async (studentId, fullName, mode) => {
+      if (!sessionId) {
+        appendEvent('warning', 'Start a session before marking attendance manually')
+        return
+      }
+
+      const payload =
+        mode === 'absent'
+          ? { is_present: false, is_late: false }
+          : mode === 'late'
+            ? { is_present: true, is_late: true, arrival_delay_minutes: 11 }
+            : { is_present: true, is_late: false }
+
+      setAttendanceBusyByStudent((prev) => ({ ...prev, [studentId]: true }))
+      try {
+        await apiFetch(`/api/sessions/${sessionId}/students/${studentId}/attendance`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        })
+        await refreshAttendance()
+        appendEvent('success', `Attendance marked ${mode} for ${fullName}`)
+      } catch (err) {
+        appendEvent('error', `Manual attendance update failed: ${err.message}`)
+      } finally {
+        setAttendanceBusyByStudent((prev) => ({ ...prev, [studentId]: false }))
+      }
+    },
+    [apiFetch, appendEvent, refreshAttendance, sessionId]
+  )
 
   const closeDashboardSocket = useCallback(() => {
     if (dashboardPingRef.current) {
@@ -452,12 +572,8 @@ export default function App() {
           const lateTag = p.is_late ? ' (Late)' : ''
           appendEvent('success', `${p.full_name} recognized | confidence ${confText}${lateTag}`)
           playBeep()
-
-          const now = Date.now()
-          if (now - attendanceRefreshGateRef.current > 1500) {
-            attendanceRefreshGateRef.current = now
-            refreshAttendance()
-          }
+          applyPresenceToAttendance(p)
+          refreshAttendance(activeSessionId)
           return
         }
 
@@ -471,26 +587,28 @@ export default function App() {
         }
       }
     },
-    [apiBase, appendEvent, closeDashboardSocket, drawOverlay, playBeep, refreshAttendance]
+    [apiBase, appendEvent, applyPresenceToAttendance, closeDashboardSocket, drawOverlay, playBeep, refreshAttendance]
   )
 
-  const loadBootstrap = useCallback(async () => {
-    setBusy((prev) => ({ ...prev, loading: true }))
+  const loadBootstrap = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setBusy((prev) => ({ ...prev, loading: true }))
     try {
       const [healthRes, courseRes] = await Promise.all([apiFetch('/api/health'), apiFetch('/api/courses')])
       setHealth(healthRes)
       const allCourses = courseRes?.items || []
       setCourses(allCourses)
-      if (allCourses.length && !courseId) {
-        setCourseId(String(allCourses[0].CourseID))
-      }
-      appendEvent('info', 'Dashboard initialized')
+      setCourseId((prev) => {
+        if (!allCourses.length) return ''
+        const hasPrev = allCourses.some((course) => String(course.CourseID) === String(prev))
+        return hasPrev ? prev : String(allCourses[0].CourseID)
+      })
+      if (!silent) appendEvent('info', 'Dashboard initialized')
     } catch (err) {
-      appendEvent('error', `Bootstrap failed: ${err.message}`)
+      appendEvent(silent ? 'warning' : 'error', `Bootstrap failed: ${err.message}`)
     } finally {
-      setBusy((prev) => ({ ...prev, loading: false }))
+      if (!silent) setBusy((prev) => ({ ...prev, loading: false }))
     }
-  }, [apiFetch, appendEvent, courseId])
+  }, [apiFetch, appendEvent])
 
   useEffect(() => {
     loadBootstrap()
@@ -500,6 +618,16 @@ export default function App() {
     if (!courseId) return
     loadGradebook()
   }, [courseId, loadGradebook])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadBootstrap({ silent: true })
+      if (courseId) loadGradebook()
+      if (sessionId) refreshAttendance()
+    }, 15000)
+
+    return () => clearInterval(timer)
+  }, [courseId, loadBootstrap, loadGradebook, refreshAttendance, sessionId])
 
   useEffect(() => {
     const render = renderRef.current
@@ -584,10 +712,15 @@ export default function App() {
       })
       const sid = data.session_id
       setSessionId(sid)
+      setAttendance([])
       clearFrameCanvases()
       overlayRef.current = { frameWidth: 0, frameHeight: 0, faces: [] }
+      if (cameraActiveRef.current) {
+        stopCamera()
+      }
       connectDashboardSocket(sid)
-      await Promise.all([refreshAttendance(), loadGradebook()])
+      await Promise.all([refreshAttendance(sid), loadGradebook()])
+      await startCamera(sid)
       appendEvent('success', `Session started for course ${courseId}`)
     } catch (err) {
       appendEvent('error', `Session start failed: ${err.message}`)
@@ -596,8 +729,9 @@ export default function App() {
     }
   }
 
-  const startCamera = async () => {
-    if (!sessionId) {
+  const startCamera = async (activeSessionId = null) => {
+    const targetSessionId = activeSessionId || sessionId
+    if (!targetSessionId) {
       appendEvent('warning', 'Start a session before enabling camera stream')
       return
     }
@@ -606,7 +740,7 @@ export default function App() {
       return
     }
 
-    const ws = new WebSocket(`${toWsBase(apiBase)}/ws/camera/${sessionId}`)
+    const ws = new WebSocket(`${toWsBase(apiBase)}/ws/camera/${targetSessionId}`)
     cameraWsRef.current = ws
 
     ws.onopen = async () => {
@@ -679,6 +813,14 @@ export default function App() {
       stopCamera()
     }
   }
+
+  const toggleCamera = useCallback(() => {
+    if (cameraRunning) {
+      stopCamera()
+      return
+    }
+    startCamera()
+  }, [cameraRunning, startCamera, stopCamera])
 
   const finalizeSession = async () => {
     if (!sessionId) {
@@ -771,33 +913,28 @@ export default function App() {
           </label>
 
           <div className="flex flex-wrap gap-2 lg:col-span-5 lg:justify-end lg:self-end">
-            <button
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={loadBootstrap}
-              disabled={busy.loading}
+            <label
+              className={`inline-flex items-center gap-2 ${!sessionId ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
             >
-              Refresh
-            </button>
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={cameraRunning}
+                onChange={toggleCamera}
+                disabled={!sessionId}
+                aria-label="Camera toggle"
+              />
+              <span className="relative h-6 w-11 rounded-full bg-slate-300 transition-colors duration-200 peer-checked:bg-emerald-500 dark:bg-slate-700 dark:peer-checked:bg-emerald-500 after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:duration-200 peer-checked:after:translate-x-5" />
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Camera {cameraRunning ? 'On' : 'Off'}
+              </span>
+            </label>
             <button
               className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={startSession}
               disabled={busy.starting || !courseId}
             >
               {busy.starting ? 'Starting...' : 'Start Session'}
-            </button>
-            <button
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={startCamera}
-              disabled={!sessionId || cameraRunning}
-            >
-              Start Camera
-            </button>
-            <button
-              className="rounded-lg border border-amber-500 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300 dark:hover:bg-amber-900/30"
-              onClick={stopCamera}
-              disabled={!cameraRunning}
-            >
-              Stop Camera
             </button>
             <button
               className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -823,11 +960,11 @@ export default function App() {
         <StatCard label="Enrolled" value={enrolledCount} hint="Students loaded in gradebook" />
         <StatCard label="Present" value={presentCount} hint="Detected and checked-in" />
         <StatCard label="Late" value={lateCount} hint="Arrival beyond grace period" />
-        <StatCard label="At Risk" value={atRiskCount} hint="Low score or high absence" />
+        <StatCard label="Needs Attention" value={atRiskCount} hint="Low score or high absence" />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <article className="glass-card min-h-[360px] p-3 xl:col-span-2">
+      <section className="grid gap-4">
+        <article className="glass-card min-h-[360px] p-3">
           <header className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
               Live Feed & Face Overlay
@@ -848,75 +985,77 @@ export default function App() {
             )}
           </div>
         </article>
-
-        <article className="glass-card flex min-h-[360px] flex-col p-3">
-          <header className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Recognition Events
-            </h2>
-            <button
-              className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={() => setEvents([])}
-            >
-              Clear
-            </button>
-          </header>
-
-          <ul className="scroll-slim flex-1 space-y-2 overflow-auto pr-1">
-            {events.length === 0 ? (
-              <li className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                No events yet.
-              </li>
-            ) : (
-              events.map((event) => (
-                <li
-                  key={event.id}
-                  className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-slate-900"
-                >
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className={`data-chip ${levelClass(event.level)}`}>{event.level}</span>
-                    <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{formatClock(event.at)}</span>
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-200">{event.message}</p>
-                </li>
-              ))
-            )}
-          </ul>
-        </article>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-3">
         <article className="glass-card min-h-[280px] p-3 xl:col-span-1">
           <header className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Session Attendance
-            </h2>
-            <button
-              className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={refreshAttendance}
-            >
-              Refresh
-            </button>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Session Attendance
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Manual check-in enabled (camera optional)</p>
+            </div>
           </header>
           <div className="scroll-slim max-h-[300px] overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
-            <table className="w-full min-w-[420px] text-left text-xs">
+            <table className="w-full min-w-[620px] text-left text-xs">
               <thead className="sticky top-0 bg-slate-100 dark:bg-slate-900">
                 <tr>
                   <th className="px-2 py-2">Name</th>
-                  <th className="px-2 py-2">Present</th>
-                  <th className="px-2 py-2">Late</th>
+                  <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">Manual</th>
                 </tr>
               </thead>
               <tbody>
-                {attendance.map((row) => (
-                  <tr key={`${row.StudentID}-${row.FullName}`} className="border-t border-slate-200 dark:border-slate-800">
-                    <td className="px-2 py-2 font-medium">{row.FullName}</td>
-                    <td className="px-2 py-2">{row.IsPresent ? 'Yes' : 'No'}</td>
-                    <td className="px-2 py-2">
-                      {row.IsLate ? `Yes (${row.ArrivalDelayMinutes ?? '-'}m)` : 'No'}
-                    </td>
-                  </tr>
-                ))}
+                {attendance.map((row) => {
+                  const isRowBusy = Boolean(attendanceBusyByStudent[row.StudentID])
+                  const isAbsent = !row.IsPresent
+                  const isLate = Boolean(row.IsPresent && row.IsLate)
+                  const attendanceRowClass = isAbsent
+                    ? 'border-t border-slate-200 bg-rose-50/70 dark:border-slate-800 dark:bg-rose-900/20'
+                    : isLate
+                      ? 'border-t border-slate-200 bg-amber-50/70 dark:border-slate-800 dark:bg-amber-900/20'
+                      : 'border-t border-slate-200 dark:border-slate-800'
+                  return (
+                    <tr key={`${row.StudentID}-${row.FullName}`} className={attendanceRowClass}>
+                      <td className="px-2 py-2 font-medium">{row.FullName}</td>
+                      <td className="px-2 py-2">
+                        {isAbsent ? (
+                          <span className="data-chip bad">Absent</span>
+                        ) : isLate ? (
+                          <span className="data-chip warn">Late ({row.ArrivalDelayMinutes ?? '-'}m)</span>
+                        ) : (
+                          <span className="data-chip ok">On Time</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            className="rounded border border-emerald-400 px-2 py-1 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                            onClick={() => markManualAttendance(row.StudentID, row.FullName, 'present')}
+                            disabled={!sessionId || isRowBusy}
+                          >
+                            Present
+                          </button>
+                          <button
+                            className="rounded border border-amber-400 px-2 py-1 font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                            onClick={() => markManualAttendance(row.StudentID, row.FullName, 'late')}
+                            disabled={!sessionId || isRowBusy}
+                          >
+                            Late
+                          </button>
+                          <button
+                            className="rounded border border-rose-400 px-2 py-1 font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-700 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                            onClick={() => markManualAttendance(row.StudentID, row.FullName, 'absent')}
+                            disabled={!sessionId || isRowBusy}
+                          >
+                            Absent
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
                 {!attendance.length && (
                   <tr>
                     <td className="px-2 py-3 text-slate-500 dark:text-slate-400" colSpan={3}>
@@ -931,19 +1070,16 @@ export default function App() {
 
         <article className="glass-card min-h-[280px] p-3 xl:col-span-2">
           <header className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Gradebook (Scannable View)
-            </h2>
-            <button
-              className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={loadGradebook}
-            >
-              Reload
-            </button>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Gradebook (Scannable View)
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Manual grade entry per student</p>
+            </div>
           </header>
 
           <div className="scroll-slim max-h-[300px] overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
-            <table className="w-full min-w-[980px] text-left text-xs">
+            <table className="w-full min-w-[1160px] text-left text-xs">
               <thead className="sticky top-0 bg-slate-100 dark:bg-slate-900">
                 <tr>
                   <th className="px-2 py-2">Name</th>
@@ -955,31 +1091,134 @@ export default function App() {
                   <th className="px-2 py-2">Final</th>
                   <th className="px-2 py-2">Absent Hrs</th>
                   <th className="px-2 py-2">Penalty</th>
-                  <th className="px-2 py-2">Adjusted</th>
-                  <th className="px-2 py-2">Risk</th>
+                  <th className="px-2 py-2">Total</th>
+                  <th className="px-2 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {gradebook.map((row) => {
-                  const risk = row.AtRiskByPolicy ? 'Yes' : 'No'
-                  const riskCls = row.AtRiskByPolicy ? 'bad' : 'ok'
+                  const isAtRisk = Boolean(row.AtRiskByPolicy)
+                  const isEditing = Number(gradeEditor?.studentId) === Number(row.StudentID)
+                  const isSaving = Boolean(gradeBusyByStudent[row.StudentID])
+                  const gradeRowClass = isAtRisk
+                    ? 'border-t border-slate-200 bg-rose-50/70 dark:border-slate-800 dark:bg-rose-900/20'
+                    : 'border-t border-slate-200 dark:border-slate-800'
                   return (
                     <tr
                       key={`${row.StudentID}-${row.StudentCode}`}
-                      className="border-t border-slate-200 dark:border-slate-800"
+                      className={gradeRowClass}
                     >
                       <td className="px-2 py-2 font-medium">{row.FullName}</td>
-                      <td className="px-2 py-2">{Number(row.Quiz1).toFixed(2)}</td>
-                      <td className="px-2 py-2">{Number(row.Quiz2).toFixed(2)}</td>
-                      <td className="px-2 py-2">{Number(row.ProjectGrade).toFixed(2)}</td>
-                      <td className="px-2 py-2">{Number(row.AssignmentGrade).toFixed(2)}</td>
-                      <td className="px-2 py-2">{Number(row.MidtermGrade).toFixed(2)}</td>
-                      <td className="px-2 py-2">{Number(row.FinalExamGrade).toFixed(2)}</td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.quiz1}
+                            onChange={(e) => updateGradeDraftField('quiz1', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.Quiz1).toFixed(2)
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.quiz2}
+                            onChange={(e) => updateGradeDraftField('quiz2', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.Quiz2).toFixed(2)
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.project}
+                            onChange={(e) => updateGradeDraftField('project', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.ProjectGrade).toFixed(2)
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.assignment}
+                            onChange={(e) => updateGradeDraftField('assignment', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.AssignmentGrade).toFixed(2)
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.midterm}
+                            onChange={(e) => updateGradeDraftField('midterm', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.MidtermGrade).toFixed(2)
+                        )}
+                      </td>
+                      <td className="px-2 py-2">
+                        {isEditing ? (
+                          <input
+                            className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs focus:border-cyan-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900"
+                            type="number"
+                            step="0.01"
+                            value={gradeEditor.values.final_exam}
+                            onChange={(e) => updateGradeDraftField('final_exam', e.target.value)}
+                          />
+                        ) : (
+                          Number(row.FinalExamGrade).toFixed(2)
+                        )}
+                      </td>
                       <td className="px-2 py-2">{Number(row.HoursAbsentTotal).toFixed(2)}</td>
                       <td className="px-2 py-2">{Number(row.AttendancePenalty).toFixed(2)}</td>
-                      <td className="px-2 py-2 font-semibold">{Number(row.AdjustedTotal).toFixed(2)}</td>
+                      <td className={`px-2 py-2 font-semibold ${isAtRisk ? 'text-rose-700 dark:text-rose-300' : ''}`}>
+                        {Number(row.AdjustedTotal).toFixed(2)}
+                      </td>
                       <td className="px-2 py-2">
-                        <span className={`data-chip ${riskCls}`}>{risk}</span>
+                        {isEditing ? (
+                          <div className="flex gap-1">
+                            <button
+                              className="rounded border border-cyan-500 px-2 py-1 font-semibold text-cyan-700 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-300 dark:hover:bg-cyan-900/40"
+                              onClick={() => saveGradeEdit(row.StudentID)}
+                              disabled={isSaving}
+                            >
+                              {isSaving ? 'Saving...' : 'Save'}
+                            </button>
+                            <button
+                              className="rounded border border-slate-400 px-2 py-1 font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                              onClick={cancelGradeEdit}
+                              disabled={isSaving}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="rounded border border-cyan-500 px-2 py-1 font-semibold text-cyan-700 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-300 dark:hover:bg-cyan-900/40"
+                            onClick={() => startGradeEdit(row)}
+                            disabled={Boolean(gradeEditor) && !isEditing}
+                          >
+                            Edit
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )

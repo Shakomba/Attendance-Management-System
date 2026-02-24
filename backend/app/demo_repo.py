@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -308,6 +308,25 @@ class DemoRepository:
         rows.sort(key=lambda row: row["FullName"])
         return rows
 
+    def update_student_grades(self, course_id: int, student_id: int, grades: Dict[str, Any]) -> Dict[str, Any]:
+        enrollment = self.enrollments.get((student_id, course_id))
+        if not enrollment:
+            raise ValueError("Enrollment was not found for grade update.")
+
+        enrollment["Quiz1"] = float(grades["quiz1"])
+        enrollment["Quiz2"] = float(grades["quiz2"])
+        enrollment["ProjectGrade"] = float(grades["project"])
+        enrollment["AssignmentGrade"] = float(grades["assignment"])
+        enrollment["MidtermGrade"] = float(grades["midterm"])
+        enrollment["FinalExamGrade"] = float(grades["final_exam"])
+        enrollment["UpdatedAt"] = self._utcnow()
+
+        for row in self.get_gradebook(course_id):
+            if int(row["StudentID"]) == int(student_id):
+                return row
+
+        raise ValueError("Updated grade row was not found.")
+
     def start_session(self, course_id: int, started_at: Optional[datetime]) -> Dict[str, Any]:
         sid = str(uuid4())
         started = started_at or self._utcnow()
@@ -433,6 +452,97 @@ class DemoRepository:
 
         rows.sort(key=lambda row: row["FullName"])
         return rows
+
+    def set_manual_attendance(
+        self,
+        session_id: str,
+        student_id: int,
+        is_present: bool,
+        is_late: bool,
+        arrival_delay_minutes: Optional[int],
+        marked_at: Optional[datetime],
+    ) -> Dict[str, Any]:
+        session = self.sessions.get(session_id)
+        if not session:
+            raise ValueError("Session not found.")
+
+        course_id = int(session["CourseID"])
+        if (student_id, course_id) not in self.enrollments:
+            raise ValueError("Student is not enrolled in this session course.")
+
+        started_at = session["StartedAt"]
+        now_value = marked_at or self._utcnow()
+        delay_minutes = (
+            max(int((now_value - started_at).total_seconds() // 60), 0)
+            if arrival_delay_minutes is None
+            else max(int(arrival_delay_minutes), 0)
+        )
+
+        key = (session_id, student_id)
+        if is_present:
+            existing = self.session_attendance.get(key)
+            if not existing:
+                self.session_attendance[key] = {
+                    "SessionID": session_id,
+                    "StudentID": student_id,
+                    "FirstSeenAt": now_value,
+                    "LastSeenAt": now_value,
+                    "IsPresent": 1,
+                    "IsLate": 1 if is_late else 0,
+                    "ArrivalDelayMinutes": delay_minutes,
+                }
+            else:
+                first_seen = existing.get("FirstSeenAt")
+                last_seen = existing.get("LastSeenAt")
+                existing["FirstSeenAt"] = now_value if first_seen is None else min(first_seen, now_value)
+                existing["LastSeenAt"] = now_value if last_seen is None else max(last_seen, now_value)
+                existing["IsPresent"] = 1
+                existing["IsLate"] = 1 if is_late else 0
+                existing["ArrivalDelayMinutes"] = delay_minutes
+
+            hour_index = delay_minutes // 60
+            self.session_hour_log[(session_id, student_id, hour_index)] = {
+                "SessionID": session_id,
+                "StudentID": student_id,
+                "HourIndex": hour_index,
+                "HourStart": started_at + timedelta(hours=hour_index),
+                "IsPresent": 1,
+                "Source": "manual",
+            }
+        else:
+            self.session_attendance[key] = {
+                "SessionID": session_id,
+                "StudentID": student_id,
+                "FirstSeenAt": None,
+                "LastSeenAt": None,
+                "IsPresent": 0,
+                "IsLate": 0,
+                "ArrivalDelayMinutes": None,
+            }
+            self.session_hour_log[(session_id, student_id, 0)] = {
+                "SessionID": session_id,
+                "StudentID": student_id,
+                "HourIndex": 0,
+                "HourStart": started_at,
+                "IsPresent": 0,
+                "Source": "manual",
+            }
+
+        row = self.get_attendance_row(session_id, student_id)
+        if not row:
+            raise ValueError("Attendance row could not be updated.")
+
+        student = self.students.get(student_id, {})
+        return {
+            "StudentID": student_id,
+            "StudentCode": student.get("StudentCode"),
+            "FullName": student.get("FullName"),
+            "FirstSeenAt": row.get("FirstSeenAt"),
+            "LastSeenAt": row.get("LastSeenAt"),
+            "IsPresent": row.get("IsPresent", 0),
+            "IsLate": row.get("IsLate", 0),
+            "ArrivalDelayMinutes": row.get("ArrivalDelayMinutes"),
+        }
 
     def get_attendance_row(self, session_id: str, student_id: int) -> Optional[Dict[str, Any]]:
         row = self.session_attendance.get((session_id, student_id))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .database import execute, fetch_all, fetch_one, get_connection
@@ -129,6 +129,46 @@ class Repository:
         )
 
     @staticmethod
+    def update_student_grades(course_id: int, student_id: int, grades: Dict[str, Any]) -> Dict[str, Any]:
+        execute(
+            """
+            UPDATE dbo.Enrollments
+            SET
+                Quiz1 = ?,
+                Quiz2 = ?,
+                ProjectGrade = ?,
+                AssignmentGrade = ?,
+                MidtermGrade = ?,
+                FinalExamGrade = ?,
+                UpdatedAt = SYSUTCDATETIME()
+            WHERE CourseID = ? AND StudentID = ?;
+            """,
+            (
+                grades["quiz1"],
+                grades["quiz2"],
+                grades["project"],
+                grades["assignment"],
+                grades["midterm"],
+                grades["final_exam"],
+                course_id,
+                student_id,
+            ),
+        )
+
+        row = fetch_one(
+            """
+            SELECT *
+            FROM dbo.vw_Gradebook
+            WHERE CourseID = ? AND StudentID = ?;
+            """,
+            (course_id, student_id),
+        )
+        if not row:
+            raise ValueError("Enrollment was not found for grade update.")
+
+        return row
+
+    @staticmethod
     def start_session(course_id: int, started_at: Optional[datetime]) -> Dict[str, Any]:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -225,6 +265,176 @@ class Repository:
             """,
             (session_id,),
         )
+
+    @staticmethod
+    def set_manual_attendance(
+        session_id: str,
+        student_id: int,
+        is_present: bool,
+        is_late: bool,
+        arrival_delay_minutes: Optional[int],
+        marked_at: Optional[datetime],
+    ) -> Dict[str, Any]:
+        session = Repository.get_session(session_id)
+        if not session:
+            raise ValueError("Session not found.")
+
+        course_id = int(session["CourseID"])
+        exists = fetch_one(
+            """
+            SELECT TOP 1 1 AS IsEnrolled
+            FROM dbo.Enrollments
+            WHERE CourseID = ? AND StudentID = ?;
+            """,
+            (course_id, student_id),
+        )
+        if not exists:
+            raise ValueError("Student is not enrolled in this session course.")
+
+        started_at = session["StartedAt"]
+        if not isinstance(started_at, datetime):
+            raise ValueError("Session start time is invalid.")
+
+        now_value = marked_at or datetime.utcnow().replace(microsecond=0)
+        delay_minutes = (
+            max(int((now_value - started_at).total_seconds() // 60), 0)
+            if arrival_delay_minutes is None
+            else max(int(arrival_delay_minutes), 0)
+        )
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            if is_present:
+                cursor.execute(
+                    """
+                    MERGE dbo.SessionAttendance AS target
+                    USING (SELECT ? AS SessionID, ? AS StudentID) AS src
+                    ON target.SessionID = src.SessionID AND target.StudentID = src.StudentID
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            FirstSeenAt = CASE
+                                WHEN target.FirstSeenAt IS NULL THEN ?
+                                WHEN ? < target.FirstSeenAt THEN ?
+                                ELSE target.FirstSeenAt
+                            END,
+                            LastSeenAt = CASE
+                                WHEN target.LastSeenAt IS NULL THEN ?
+                                WHEN ? > target.LastSeenAt THEN ?
+                                ELSE target.LastSeenAt
+                            END,
+                            IsPresent = 1,
+                            IsLate = ?,
+                            ArrivalDelayMinutes = ?
+                    WHEN NOT MATCHED THEN
+                        INSERT (SessionID, StudentID, FirstSeenAt, LastSeenAt, IsPresent, IsLate, ArrivalDelayMinutes)
+                        VALUES (?, ?, ?, ?, 1, ?, ?);
+                    """,
+                    (
+                        session_id,
+                        student_id,
+                        now_value,
+                        now_value,
+                        now_value,
+                        now_value,
+                        now_value,
+                        now_value,
+                        1 if is_late else 0,
+                        delay_minutes,
+                        session_id,
+                        student_id,
+                        now_value,
+                        now_value,
+                        1 if is_late else 0,
+                        delay_minutes,
+                    ),
+                )
+
+                hour_index = delay_minutes // 60
+                hour_start = started_at + timedelta(hours=hour_index)
+                cursor.execute(
+                    """
+                    MERGE dbo.SessionHourLog AS target
+                    USING (SELECT ? AS SessionID, ? AS StudentID, ? AS HourIndex) AS src
+                    ON target.SessionID = src.SessionID
+                       AND target.StudentID = src.StudentID
+                       AND target.HourIndex = src.HourIndex
+                    WHEN MATCHED THEN
+                        UPDATE SET IsPresent = 1, Source = N'manual'
+                    WHEN NOT MATCHED THEN
+                        INSERT (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
+                        VALUES (?, ?, ?, ?, 1, N'manual');
+                    """,
+                    (
+                        session_id,
+                        student_id,
+                        hour_index,
+                        session_id,
+                        student_id,
+                        hour_index,
+                        hour_start,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    MERGE dbo.SessionAttendance AS target
+                    USING (SELECT ? AS SessionID, ? AS StudentID) AS src
+                    ON target.SessionID = src.SessionID AND target.StudentID = src.StudentID
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            FirstSeenAt = NULL,
+                            LastSeenAt = NULL,
+                            IsPresent = 0,
+                            IsLate = 0,
+                            ArrivalDelayMinutes = NULL
+                    WHEN NOT MATCHED THEN
+                        INSERT (SessionID, StudentID, FirstSeenAt, LastSeenAt, IsPresent, IsLate, ArrivalDelayMinutes)
+                        VALUES (?, ?, NULL, NULL, 0, 0, NULL);
+                    """,
+                    (session_id, student_id, session_id, student_id),
+                )
+
+                cursor.execute(
+                    """
+                    MERGE dbo.SessionHourLog AS target
+                    USING (SELECT ? AS SessionID, ? AS StudentID, 0 AS HourIndex) AS src
+                    ON target.SessionID = src.SessionID
+                       AND target.StudentID = src.StudentID
+                       AND target.HourIndex = src.HourIndex
+                    WHEN MATCHED THEN
+                        UPDATE SET IsPresent = 0, Source = N'manual'
+                    WHEN NOT MATCHED THEN
+                        INSERT (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
+                        VALUES (?, ?, 0, ?, 0, N'manual');
+                    """,
+                    (session_id, student_id, session_id, student_id, started_at),
+                )
+
+            conn.commit()
+
+        row = fetch_one(
+            """
+            SELECT
+                s.StudentID,
+                s.StudentCode,
+                s.FullName,
+                sa.FirstSeenAt,
+                sa.LastSeenAt,
+                sa.IsPresent,
+                sa.IsLate,
+                sa.ArrivalDelayMinutes
+            FROM dbo.SessionAttendance sa
+            INNER JOIN dbo.Students s
+                ON s.StudentID = sa.StudentID
+            WHERE sa.SessionID = ? AND sa.StudentID = ?;
+            """,
+            (session_id, student_id),
+        )
+        if not row:
+            raise ValueError("Attendance row could not be updated.")
+
+        return row
 
     @staticmethod
     def get_attendance_row(session_id: str, student_id: int) -> Optional[Dict[str, Any]]:

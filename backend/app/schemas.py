@@ -39,6 +39,22 @@ class FinalizeSessionResponse(BaseModel):
     email_failures: int
 
 
+class GradeUpdateRequest(BaseModel):
+    quiz1: float
+    quiz2: float
+    project: float
+    assignment: float
+    midterm: float
+    final_exam: float
+
+
+class ManualAttendanceUpdateRequest(BaseModel):
+    is_present: bool
+    is_late: bool = False
+    arrival_delay_minutes: Optional[int] = Field(default=None, ge=0)
+    marked_at: Optional[datetime] = None
+
+
 class GenericMessage(BaseModel):
     message: str
     data: Optional[Dict] = None

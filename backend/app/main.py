@@ -15,7 +15,9 @@ from .demo_repo import DemoRepository
 from .repos import Repository
 from .schemas import (
     FinalizeSessionResponse,
+    GradeUpdateRequest,
     GenericMessage,
+    ManualAttendanceUpdateRequest,
     StartSessionRequest,
     StartSessionResponse,
     StudentCreateRequest,
@@ -122,6 +124,15 @@ def get_gradebook(course_id: int) -> dict:
     return {"items": repo.get_gradebook(course_id)}
 
 
+@app.patch("/api/courses/{course_id}/students/{student_id}/grades", response_model=GenericMessage)
+def update_student_grades(course_id: int, student_id: int, payload: GradeUpdateRequest) -> GenericMessage:
+    try:
+        updated = repo.update_student_grades(course_id, student_id, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return GenericMessage(message="Grades updated.", data=updated)
+
+
 @app.get("/api/debug/courses/{course_id}/embedding-count")
 def get_embedding_count(course_id: int) -> dict:
     if not face_engine:
@@ -144,6 +155,29 @@ def start_session(payload: StartSessionRequest) -> StartSessionResponse:
 @app.get("/api/sessions/{session_id}/attendance")
 def get_session_attendance(session_id: str) -> dict:
     return {"items": repo.get_session_attendance(session_id)}
+
+
+@app.patch("/api/sessions/{session_id}/students/{student_id}/attendance", response_model=GenericMessage)
+def update_session_attendance(
+    session_id: str, student_id: int, payload: ManualAttendanceUpdateRequest
+) -> GenericMessage:
+    marked_at = payload.marked_at
+    if marked_at and marked_at.tzinfo:
+        marked_at = marked_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+    try:
+        updated = repo.set_manual_attendance(
+            session_id=session_id,
+            student_id=student_id,
+            is_present=payload.is_present,
+            is_late=payload.is_late if payload.is_present else False,
+            arrival_delay_minutes=payload.arrival_delay_minutes,
+            marked_at=marked_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return GenericMessage(message="Attendance updated.", data=updated)
 
 
 @app.post("/api/sessions/{session_id}/finalize-send-emails", response_model=FinalizeSessionResponse)
