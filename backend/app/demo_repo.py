@@ -182,6 +182,7 @@ class DemoRepository:
             "RawTotal": round(raw_total, 2),
             "AttendancePenalty": round(penalty, 2),
             "AdjustedTotal": round(adjusted, 2),
+            "AtRisk": bool(at_risk_policy),
             "AtRiskByPolicy": bool(at_risk_policy),
         }
 

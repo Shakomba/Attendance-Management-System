@@ -5,11 +5,12 @@ export function CameraFeed({
     cameraRunning,
     viewportRef,
     frameCanvasRef,
-    overlayCanvasRef
+    overlayCanvasRef,
+    streamMetrics
 }) {
     return (
         <article className="standard-card flex flex-col min-h-[400px]">
-            <header className="p-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
+            <header className="p-4 flex flex-col xl:flex-row xl:items-center justify-between border-b gap-3 border-slate-200 dark:border-slate-800">
                 <div className="flex flex-col">
                     <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                         <span className="relative flex h-2.5 w-2.5">
@@ -27,6 +28,15 @@ export function CameraFeed({
                     </h2>
                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Automated attendance scanning</p>
                 </div>
+                {streamMetrics && (
+                    <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] font-semibold text-slate-500 dark:text-slate-400 xl:justify-end">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" title="Incoming network frames per second">IN: {streamMetrics.incomingFps} FPS</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" title="Locally drawn frames per second">DRAW: {streamMetrics.drawFps} FPS</span>
+                        {(streamMetrics.renderDrops > 0 || streamMetrics.outgoingDrops > 0) && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-200 dark:border-rose-800" title="Frames dropped locally or on network">DROP: {streamMetrics.renderDrops + streamMetrics.outgoingDrops}</span>
+                        )}
+                    </div>
+                )}
             </header>
 
             <div className="relative flex-1 p-3 bg-slate-50 dark:bg-slate-900 rounded-b-xl overflow-hidden">

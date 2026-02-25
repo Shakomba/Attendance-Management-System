@@ -6,7 +6,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
       MSSQL_TCP_PORT: "1433"
     volumes:
       - mssql_data:/var/opt/mssql
@@ -18,24 +18,27 @@ services:
   # Run once when you need to (re)initialize schema:
   # docker compose -f docker-compose.yml --profile db-init up sql-init
   sql-init:
-    image: mcr.microsoft.com/mssql-tools18
+    # Use the generic image you confirmed is available
+    image: mcr.microsoft.com/mssql-tools
     container_name: ams_sql_init
     profiles: ["db-init"]
     depends_on:
       - sqlserver
     environment:
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
     volumes:
       - ./database:/scripts:ro
     command: >
       /bin/bash -lc "
       set -e;
       for i in {1..60}; do
-        /opt/mssql-tools18/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" && break;
+        # FIXED: Removed the '18' from the path below
+        /opt/mssql-tools/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" && break;
         echo 'Waiting for SQL Server...';
         sleep 5;
       done;
-      /opt/mssql-tools18/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -i /scripts/01_init_schema.sql;
+      # FIXED: Removed the '18' from the path below
+      /opt/mssql-tools/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -i /scripts/01_init_schema.sql;
       echo 'Schema init completed.';
       "
     networks:
@@ -79,15 +82,15 @@ services:
     environment:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.shakomba.org,http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
 
-      DEMO_MODE: "false"
+      DEMO_MODE: "true"
       SQL_DRIVER: "ODBC Driver 18 for SQL Server"
       SQL_SERVER: "sqlserver"
       SQL_PORT: "1433"
       SQL_DATABASE: ${SQL_DATABASE:-AttendanceAI}
       SQL_USER: "sa"
-      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-SpinsterMoonstoneBorrowerAfternoonDelayCrestless}
+      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
       SQL_TRUST_SERVER_CERT: "yes"
 
       # Set AI_MODE=cpu if you want CPU-only operation.

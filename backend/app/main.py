@@ -306,6 +306,9 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
         while True:
             message = await websocket.receive()
 
+            if message.get("type") == "websocket.disconnect":
+                break
+
             # Handle text messages (ping/pong only)
             if "text" in message and message["text"]:
                 try:

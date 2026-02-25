@@ -1,7 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
 
-const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
 export function normalizeApiBase(value) {
     return String(value || '').trim().replace(/\/$/, '')
 }
@@ -13,15 +11,22 @@ export function toWsBase(apiBase) {
 }
 
 export function useApi() {
-    const [apiBase, setApiBase] = useState(() => localStorage.getItem('ams_api_base') || DEFAULT_API_BASE)
+    const [apiBase, setApiBase] = useState(() => {
+        const envUrl = import.meta.env.VITE_API_BASE_URL;
+
+        // If we are accessing via local IP or localhost, dynamically point to port 8000
+        if (!window.location.hostname.includes('shakomba.org')) {
+            return `${window.location.protocol}//${window.location.hostname}:8000`;
+        }
+
+        // On production domain, use the compiled env URL or default fallback
+        return envUrl || 'https://api.shakomba.org';
+    })
+
     const [health, setHealth] = useState(null)
     const [courses, setCourses] = useState([])
     const [courseId, setCourseId] = useState('')
     const [busy, setBusy] = useState({ loading: false })
-
-    useEffect(() => {
-        localStorage.setItem('ams_api_base', normalizeApiBase(apiBase))
-    }, [apiBase])
 
     const apiFetch = useCallback(
         async (path, options = {}) => {
