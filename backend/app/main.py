@@ -230,6 +230,72 @@ async def dashboard_ws(websocket: WebSocket, session_id: str) -> None:
         ws_manager.disconnect_dashboard(session_id, websocket)
 
 
+_recognition_locks: dict = {}
+
+
+async def _run_recognition(raw_bytes: bytes, sid: str) -> None:
+    """Run face recognition in a background task without blocking frame relay."""
+    try:
+        frame = await asyncio.to_thread(face_engine.decode_image_bytes, raw_bytes)
+        if frame is None:
+            return
+
+        recognized_at = datetime.now(timezone.utc)
+        frame_result = await asyncio.to_thread(
+            recognition_service.process_frame,
+            sid,
+            frame,
+            recognized_at,
+        )
+
+        await ws_manager.broadcast_dashboard(
+            sid,
+            {
+                "type": "overlay",
+                "payload": {
+                    "frame_width": int(frame.shape[1]),
+                    "frame_height": int(frame.shape[0]),
+                    "faces": [
+                        {
+                            "event_type": item.event_type,
+                            "student_id": item.student_id,
+                            "full_name": item.full_name,
+                            "confidence": item.confidence,
+                            "left": item.left,
+                            "top": item.top,
+                            "right": item.right,
+                            "bottom": item.bottom,
+                            "engine_mode": item.engine_mode,
+                        }
+                        for item in frame_result.overlays
+                    ],
+                },
+            },
+        )
+
+        for recognition_event in frame_result.notifications:
+            await ws_manager.broadcast_dashboard(
+                sid,
+                {
+                    "type": "presence",
+                    "payload": {
+                        "student_id": recognition_event.student_id,
+                        "event_type": recognition_event.event_type,
+                        "full_name": recognition_event.full_name,
+                        "confidence": recognition_event.confidence,
+                        "is_late": recognition_event.is_late,
+                        "arrival_delay_minutes": recognition_event.arrival_delay_minutes,
+                        "recognized_at": recognition_event.recognized_at,
+                        "engine_mode": recognition_event.engine_mode,
+                    },
+                },
+            )
+    except Exception:
+        pass
+    finally:
+        _recognition_locks[sid] = False
+
+
 @app.websocket("/ws/camera/{session_id}")
 async def camera_ws(websocket: WebSocket, session_id: str) -> None:
     await ws_manager.connect_camera(session_id, websocket)
@@ -238,29 +304,24 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
 
     try:
         while True:
-            raw_text = await websocket.receive_text()
-            payload = json.loads(raw_text)
-            message_type = payload.get("type")
+            message = await websocket.receive()
 
-            if message_type == "ping":
-                await websocket.send_json({"type": "pong"})
+            # Handle text messages (ping/pong only)
+            if "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    if payload.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
                 continue
 
-            if message_type != "frame":
+            # Handle binary messages (raw JPEG frames)
+            raw_bytes = message.get("bytes")
+            if not raw_bytes:
                 continue
 
-            image_b64 = payload.get("image", "")
-            if not image_b64:
-                continue
-
-            await ws_manager.broadcast_dashboard(
-                session_id,
-                {
-                    "type": "frame",
-                    "image": image_b64,
-                    "timestamp": payload.get("timestamp"),
-                },
-            )
+            # Frames are rendered locally in the browser — no relay needed
 
             if not recognition_service or not face_engine:
                 if frame_count % 120 == 0:
@@ -278,6 +339,10 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
             if frame_count % max(settings.recognition_frame_stride, 1) != 0:
                 continue
 
+            # Skip if previous recognition is still running
+            if _recognition_locks.get(session_id, False):
+                continue
+
             if frame_count % 120 == 0:
                 known_count = recognition_service.known_face_count_for_session(session_id)
                 if known_count == 0:
@@ -292,65 +357,9 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
                         },
                     )
 
-            frame_bytes = _decode_base64_frame(image_b64)
-            if not frame_bytes:
-                continue
-
-            frame = face_engine.decode_image_bytes(frame_bytes)
-            if frame is None:
-                continue
-
-            recognized_at = _parse_timestamp(payload.get("timestamp"))
-
-            frame_result = await asyncio.to_thread(
-                recognition_service.process_frame,
-                session_id,
-                frame,
-                recognized_at,
-            )
-
-            await ws_manager.broadcast_dashboard(
-                session_id,
-                {
-                    "type": "overlay",
-                    "payload": {
-                        "frame_width": int(frame.shape[1]),
-                        "frame_height": int(frame.shape[0]),
-                        "faces": [
-                            {
-                                "event_type": item.event_type,
-                                "student_id": item.student_id,
-                                "full_name": item.full_name,
-                                "confidence": item.confidence,
-                                "left": item.left,
-                                "top": item.top,
-                                "right": item.right,
-                                "bottom": item.bottom,
-                                "engine_mode": item.engine_mode,
-                            }
-                            for item in frame_result.overlays
-                        ],
-                    },
-                },
-            )
-
-            for recognition_event in frame_result.notifications:
-                await ws_manager.broadcast_dashboard(
-                    session_id,
-                    {
-                        "type": "presence",
-                        "payload": {
-                            "student_id": recognition_event.student_id,
-                            "event_type": recognition_event.event_type,
-                            "full_name": recognition_event.full_name,
-                            "confidence": recognition_event.confidence,
-                            "is_late": recognition_event.is_late,
-                            "arrival_delay_minutes": recognition_event.arrival_delay_minutes,
-                            "recognized_at": recognition_event.recognized_at,
-                            "engine_mode": recognition_event.engine_mode,
-                        },
-                    },
-                )
+            # Fire recognition as background task — does NOT block frame relay
+            _recognition_locks[session_id] = True
+            asyncio.create_task(_run_recognition(raw_bytes, session_id))
 
     except WebSocketDisconnect:
         ws_manager.disconnect_camera(session_id, websocket)

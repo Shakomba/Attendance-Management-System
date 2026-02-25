@@ -56,7 +56,7 @@ export function useDashboardSocket(toWsBase, apiBase) {
     useEffect(() => closeDashboardSocket, [closeDashboardSocket])
 
     const connectDashboardSocket = useCallback(
-        (activeSessionId, { appendEvent, applyPresenceToAttendance, refreshAttendance, handleFrame, drawOverlay }) => {
+        (activeSessionId, { appendEvent, applyPresenceToAttendance, refreshAttendance, drawOverlay }) => {
             closeDashboardSocket()
 
             const ws = new WebSocket(`${toWsBase(apiBase)}/ws/dashboard/${activeSessionId}`)
@@ -78,13 +78,9 @@ export function useDashboardSocket(toWsBase, apiBase) {
             }
 
             ws.onmessage = (event) => {
+                // Only JSON messages (overlay, presence, info, warning)
                 let message = null
                 try { message = JSON.parse(event.data) } catch { return }
-
-                if (message.type === 'frame' && message.image) {
-                    handleFrame(message.image)
-                    return
-                }
 
                 if (message.type === 'overlay') {
                     const payload = message.payload || {}

@@ -107,7 +107,7 @@ class DemoRepository:
         return None
 
     def bootstrap_embeddings_from_folder(self, face_engine: Any, folder: Optional[str] = None) -> Dict[str, int]:
-        root = Path(__file__).resolve().parents[2]
+        root = Path(__file__).resolve().parents[1]
         photos_dir = Path(folder) if folder else (root / "student_photos")
 
         stats = {

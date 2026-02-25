@@ -12,7 +12,7 @@ import { AttendanceTable } from "./components/dashboard/AttendanceTable";
 import { GradebookTable } from "./components/dashboard/GradebookTable";
 import { cn } from "./lib/utils";
 
-const DASH_DRAW_FPS = 18;
+const DASH_DRAW_FPS = 30;
 
 // Utility for scaling overlay
 function containRect(sourceW, sourceH, targetW, targetH) {
@@ -56,7 +56,7 @@ export default function App() {
   });
 
   // Global Hooks
-  const { apiBase, apiFetch, courses, courseId, setCourseId, loadBootstrap } =
+  const { apiBase, apiFetch, courses, courseId, setCourseId, loadBootstrap, health } =
     useApi();
   const {
     sessionId,
@@ -74,6 +74,7 @@ export default function App() {
 
   const {
     cameraRunning,
+    cameraDrops,
     startCamera,
     stopCamera,
     videoWorkerRef,
@@ -89,6 +90,12 @@ export default function App() {
   const [gradeEditor, setGradeEditor] = useState(null);
   const [gradeBusyByStudent, setGradeBusyByStudent] = useState({});
   const [attendanceBusyByStudent, setAttendanceBusyByStudent] = useState({});
+  const [streamMetrics, setStreamMetrics] = useState({
+    incomingFps: 0,
+    drawFps: 0,
+    renderDrops: 0,
+    outgoingDrops: 0
+  });
 
   // Canvas Refs
   const viewportRef = useRef(null);
@@ -105,9 +112,11 @@ export default function App() {
     pendingFrame: null,
     drawBusy: false,
     lastDrawAt: 0,
-    image: null,
     lastImageWidth: 0,
     lastImageHeight: 0,
+    incomingWindow: 0,
+    drawnWindow: 0,
+    droppedWindow: 0,
   });
 
   // Theme Sync
@@ -225,8 +234,8 @@ export default function App() {
       ctx.fillStyle = "#020617";
       ctx.fillRect(0, 0, cssW, cssH);
 
-      const sourceW = img.naturalWidth || img.width;
-      const sourceH = img.naturalHeight || img.height;
+      const sourceW = img.videoWidth || img.naturalWidth || img.width;
+      const sourceH = img.videoHeight || img.naturalHeight || img.height;
       if (!sourceW || !sourceH) return;
 
       renderRef.current.lastImageWidth = sourceW;
@@ -281,50 +290,37 @@ export default function App() {
     [setAttendance],
   );
 
-  const handleFrame = useCallback((imageStr) => {
-    renderRef.current.pendingFrame = imageStr;
-  }, []);
-
-  // Render Loop
+  // Render Loop — draws directly from local <video> element (zero network latency)
   useEffect(() => {
     const render = renderRef.current;
-    const image = new Image();
-    image.decoding = "async";
-    render.image = image;
-
     let rafId = 0;
-    const drawIntervalMs = 1000 / DASH_DRAW_FPS;
 
-    const frameLoop = (ts) => {
-      const state = renderRef.current;
-      const pending = state.pendingFrame;
-      if (
-        pending &&
-        !state.drawBusy &&
-        ts - state.lastDrawAt >= drawIntervalMs
-      ) {
-        state.pendingFrame = null;
-        state.drawBusy = true;
-        state.image.onload = () => {
-          drawFrame(state.image);
-          state.drawBusy = false;
-          state.lastDrawAt = performance.now();
-        };
-        state.image.onerror = () => {
-          state.drawBusy = false;
-        };
-        state.image.src = `data:image/jpeg;base64,${pending}`;
+    const frameLoop = () => {
+      const video = videoWorkerRef.current;
+      if (video && video.readyState >= 2 && video.videoWidth > 0) {
+        drawFrame(video);
+        render.drawnWindow += 1;
       }
       rafId = requestAnimationFrame(frameLoop);
     };
     rafId = requestAnimationFrame(frameLoop);
 
-    // Reset drops metric routinely since it's no longer fed to the UI, just to keep stats clear.
-    const resetTimer = setInterval(() => setCameraDrops(0), 1000);
+    const metricTimer = setInterval(() => {
+      const state = renderRef.current;
+      setStreamMetrics({
+        incomingFps: 0,
+        drawFps: state.drawnWindow,
+        renderDrops: 0,
+        outgoingDrops: cameraDrops,
+      });
+      state.drawnWindow = 0;
+      setCameraDrops(0);
+    }, 1000);
 
     const resizeObserver = new ResizeObserver(() => {
-      if (renderRef.current.image?.complete && renderRef.current.lastImageWidth)
-        drawFrame(renderRef.current.image);
+      const video = videoWorkerRef.current;
+      if (video && video.readyState >= 2 && video.videoWidth > 0)
+        drawFrame(video);
       else clearFrameCanvases();
       drawOverlay();
     });
@@ -332,10 +328,10 @@ export default function App() {
 
     return () => {
       cancelAnimationFrame(rafId);
-      clearInterval(resetTimer);
+      clearInterval(metricTimer);
       resizeObserver.disconnect();
     };
-  }, [clearFrameCanvases, drawFrame, drawOverlay, setCameraDrops]);
+  }, [clearFrameCanvases, drawFrame, drawOverlay, setCameraDrops, cameraDrops, videoWorkerRef]);
 
   // Session Handlers
   const handleStartSession = async () => {
@@ -348,7 +344,6 @@ export default function App() {
         appendEvent,
         applyPresenceToAttendance,
         refreshAttendance,
-        handleFrame,
         drawOverlay,
       });
       await Promise.all([refreshAttendance(sid), loadGradebook()]);
@@ -454,8 +449,11 @@ export default function App() {
         <div className="flex flex-col gap-5">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
                 Attendance Management
+                <span className="text-xs font-medium px-2.5 py-1 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300 border border-sky-200 dark:border-sky-800 uppercase tracking-wide">
+                  AI: {health?.ai_mode || '-'} ({health?.ai_model || '-'})
+                </span>
               </h1>
               <p className="text-sm text-slate-500 mt-1 dark:text-slate-400">
                 Classroom administration and grade tracking
@@ -652,6 +650,7 @@ export default function App() {
             viewportRef={viewportRef}
             frameCanvasRef={frameCanvasRef}
             overlayCanvasRef={overlayCanvasRef}
+            streamMetrics={streamMetrics}
           />
         </div>
 
@@ -685,7 +684,7 @@ export default function App() {
 
       <video
         ref={videoWorkerRef}
-        className="hidden"
+        style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }}
         autoPlay
         muted
         playsInline

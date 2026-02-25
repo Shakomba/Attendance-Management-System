@@ -38,15 +38,30 @@ class WebSocketManager:
                 await ws.send_json(payload)
             except Exception as exc:
                 dead.append(ws)
-                # Only log truly unexpected errors; closed/disconnected sockets are normal.
                 if ws.client_state not in (WebSocketState.DISCONNECTED,):
                     logger.warning("WebSocket send error (session=%s): %s", session_id, exc)
 
         for ws in dead:
             clients[session_id].discard(ws)
 
+    async def _broadcast_bytes(self, clients: Dict[str, Set[WebSocket]], session_id: str, data: bytes) -> None:
+        dead = []
+        for ws in list(clients.get(session_id, set())):
+            try:
+                await ws.send_bytes(data)
+            except Exception as exc:
+                dead.append(ws)
+                if ws.client_state not in (WebSocketState.DISCONNECTED,):
+                    logger.warning("WebSocket binary send error (session=%s): %s", session_id, exc)
+
+        for ws in dead:
+            clients[session_id].discard(ws)
+
     async def broadcast_dashboard(self, session_id: str, payload: dict) -> None:
         await self._broadcast(self.dashboard_clients, session_id, payload)
+
+    async def broadcast_dashboard_bytes(self, session_id: str, data: bytes) -> None:
+        await self._broadcast_bytes(self.dashboard_clients, session_id, data)
 
     async def broadcast_camera(self, session_id: str, payload: dict) -> None:
         await self._broadcast(self.camera_clients, session_id, payload)

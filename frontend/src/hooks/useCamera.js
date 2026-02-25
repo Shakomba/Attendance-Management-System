@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-const CAMERA_SEND_FPS = 6
-const CAMERA_BUFFER_LIMIT = 1_500_000
+const CAMERA_SEND_FPS = 24
+const CAMERA_BUFFER_LIMIT = 3_000_000
 
 export function useCamera(toWsBase, apiBase) {
     const [cameraRunning, setCameraRunning] = useState(false)
@@ -13,6 +13,7 @@ export function useCamera(toWsBase, apiBase) {
     const cameraActiveRef = useRef(false)
     const videoWorkerRef = useRef(null)
     const captureCanvasRef = useRef(null)
+    const sendBusyRef = useRef(false)
 
     const stopCamera = useCallback(() => {
         cameraActiveRef.current = false
@@ -47,6 +48,7 @@ export function useCamera(toWsBase, apiBase) {
         }
 
         const ws = new WebSocket(`${toWsBase(apiBase)}/ws/camera/${activeSessionId}`)
+        ws.binaryType = 'arraybuffer'
         cameraWsRef.current = ws
 
         ws.onopen = async () => {
@@ -76,6 +78,7 @@ export function useCamera(toWsBase, apiBase) {
                     if (!cameraActiveRef.current) return
                     if (!cameraWsRef.current || cameraWsRef.current.readyState !== WebSocket.OPEN) return
                     if (!captureCanvas || !captureCtx || !video.videoWidth || !video.videoHeight) return
+                    if (sendBusyRef.current) return
 
                     if (cameraWsRef.current.bufferedAmount > CAMERA_BUFFER_LIMIT) {
                         setCameraDrops(d => d + 1)
@@ -88,11 +91,14 @@ export function useCamera(toWsBase, apiBase) {
                     captureCanvas.height = height
                     captureCtx.drawImage(video, 0, 0, width, height)
 
-                    const jpeg = captureCanvas.toDataURL('image/jpeg', 0.58)
-                    const base64 = jpeg.split(',')[1]
-                    cameraWsRef.current.send(
-                        JSON.stringify({ type: 'frame', image: base64, timestamp: new Date().toISOString() })
-                    )
+                    // Send raw JPEG blob as binary WebSocket message (no base64/JSON overhead)
+                    sendBusyRef.current = true
+                    captureCanvas.toBlob((blob) => {
+                        sendBusyRef.current = false
+                        if (!blob) return
+                        if (!cameraWsRef.current || cameraWsRef.current.readyState !== WebSocket.OPEN) return
+                        cameraWsRef.current.send(blob)
+                    }, 'image/jpeg', 0.58)
                 }, Math.round(1000 / CAMERA_SEND_FPS))
             } catch (err) {
                 appendEvent?.('error', `Camera start failed: ${err.message}`)
