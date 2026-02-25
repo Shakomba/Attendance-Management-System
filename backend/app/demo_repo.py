@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -46,7 +46,8 @@ class DemoRepository:
 
     @staticmethod
     def _utcnow() -> datetime:
-        return datetime.utcnow().replace(microsecond=0)
+        """Return the current UTC time as a naive datetime (consistent with DB expectations)."""
+        return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
     def _seed_demo_data(self) -> None:
         self.create_student_and_enroll(
@@ -176,13 +177,11 @@ class DemoRepository:
         )
         penalty = float(enrollment["HoursAbsentTotal"]) * 0.25
         adjusted = max(0.0, raw_total - penalty)
-        at_risk = adjusted < 60 or float(enrollment["HoursAbsentTotal"]) >= 8
         at_risk_policy = adjusted < 60 or float(enrollment["HoursAbsentTotal"]) >= max_absent
         return {
             "RawTotal": round(raw_total, 2),
             "AttendancePenalty": round(penalty, 2),
             "AdjustedTotal": round(adjusted, 2),
-            "AtRisk": bool(at_risk),
             "AtRiskByPolicy": bool(at_risk_policy),
         }
 

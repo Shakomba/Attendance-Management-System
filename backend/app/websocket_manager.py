@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from typing import Dict, Set
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketState
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
@@ -27,13 +31,22 @@ class WebSocketManager:
         if session_id in self.camera_clients:
             self.camera_clients[session_id].discard(websocket)
 
-    async def broadcast_dashboard(self, session_id: str, payload: dict) -> None:
+    async def _broadcast(self, clients: Dict[str, Set[WebSocket]], session_id: str, payload: dict) -> None:
         dead = []
-        for ws in self.dashboard_clients.get(session_id, set()):
+        for ws in list(clients.get(session_id, set())):
             try:
                 await ws.send_json(payload)
-            except Exception:
+            except Exception as exc:
                 dead.append(ws)
+                # Only log truly unexpected errors; closed/disconnected sockets are normal.
+                if ws.client_state not in (WebSocketState.DISCONNECTED,):
+                    logger.warning("WebSocket send error (session=%s): %s", session_id, exc)
 
         for ws in dead:
-            self.dashboard_clients[session_id].discard(ws)
+            clients[session_id].discard(ws)
+
+    async def broadcast_dashboard(self, session_id: str, payload: dict) -> None:
+        await self._broadcast(self.dashboard_clients, session_id, payload)
+
+    async def broadcast_camera(self, session_id: str, payload: dict) -> None:
+        await self._broadcast(self.camera_clients, session_id, payload)

@@ -5,12 +5,12 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class GradesPayload(BaseModel):
-    quiz1: float = 0
-    quiz2: float = 0
-    project: float = 0
-    assignment: float = 0
-    midterm: float = 0
-    final_exam: float = 0
+    quiz1: float = Field(default=0, ge=0, le=100)
+    quiz2: float = Field(default=0, ge=0, le=100)
+    project: float = Field(default=0, ge=0, le=100)
+    assignment: float = Field(default=0, ge=0, le=100)
+    midterm: float = Field(default=0, ge=0, le=100)
+    final_exam: float = Field(default=0, ge=0, le=100)
 
 
 class StudentCreateRequest(BaseModel):
@@ -40,12 +40,12 @@ class FinalizeSessionResponse(BaseModel):
 
 
 class GradeUpdateRequest(BaseModel):
-    quiz1: float
-    quiz2: float
-    project: float
-    assignment: float
-    midterm: float
-    final_exam: float
+    quiz1: float = Field(ge=0, le=100)
+    quiz2: float = Field(ge=0, le=100)
+    project: float = Field(ge=0, le=100)
+    assignment: float = Field(ge=0, le=100)
+    midterm: float = Field(ge=0, le=100)
+    final_exam: float = Field(ge=0, le=100)
 
 
 class ManualAttendanceUpdateRequest(BaseModel):

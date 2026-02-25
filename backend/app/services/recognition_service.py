@@ -105,7 +105,10 @@ class RecognitionService:
             return output
 
         known_faces = self._load_known_embeddings(course_id)
+        # Normalise to timezone-aware UTC to prevent TypeError when comparing with stored datetimes.
         event_time = recognized_at or datetime.now(timezone.utc)
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=timezone.utc)
         event_time_db = self._to_utc_naive(event_time)
 
         for detection in detections:

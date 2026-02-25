@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .database import execute, fetch_all, fetch_one, get_connection
@@ -295,7 +295,7 @@ class Repository:
         if not isinstance(started_at, datetime):
             raise ValueError("Session start time is invalid.")
 
-        now_value = marked_at or datetime.utcnow().replace(microsecond=0)
+        now_value = marked_at or datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
         delay_minutes = (
             max(int((now_value - started_at).total_seconds() // 60), 0)
             if arrival_delay_minutes is None

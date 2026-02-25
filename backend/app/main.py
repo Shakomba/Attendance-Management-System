@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -27,24 +27,6 @@ from .services.face_engine import FaceEngine
 from .services.recognition_service import RecognitionService
 from .websocket_manager import WebSocketManager
 
-load_dotenv()
-
-app = FastAPI(
-    title="Distributed AI Attendance & Grade Management API",
-    version="1.0.0",
-)
-
-allow_origins = list(settings.cors_origins) if settings.cors_origins else ["*"]
-if "*" in allow_origins:
-    allow_origins = ["*"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 repo = DemoRepository() if settings.demo_mode else Repository()
 ws_manager = WebSocketManager()
@@ -61,17 +43,35 @@ except Exception as exc:  # pragma: no cover
     face_engine_error = str(exc)
 
 
-@app.on_event("startup")
-def bootstrap_demo_embeddings() -> None:
-    if not settings.demo_mode or not face_engine:
-        return
-
-    if hasattr(repo, "bootstrap_embeddings_from_folder"):
+@asynccontextmanager
+async def lifespan(application):
+    """Run startup logic then yield to handle requests."""
+    if settings.demo_mode and face_engine and hasattr(repo, "bootstrap_embeddings_from_folder"):
         try:
             stats = repo.bootstrap_embeddings_from_folder(face_engine)
             print(f"[startup] Demo embedding bootstrap: {stats}")
         except Exception as exc:  # pragma: no cover
             print(f"[startup] Demo embedding bootstrap failed: {exc}")
+    yield
+
+
+app = FastAPI(
+    title="Distributed AI Attendance & Grade Management API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+allow_origins = list(settings.cors_origins) if settings.cors_origins else ["*"]
+if "*" in allow_origins:
+    allow_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/health")

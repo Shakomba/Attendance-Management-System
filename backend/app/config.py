@@ -1,13 +1,13 @@
 import os
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-def _as_bool(value: str, default: bool = False) -> bool:
+def _as_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
