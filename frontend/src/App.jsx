@@ -684,7 +684,7 @@ export default function App() {
 
       <video
         ref={videoWorkerRef}
-        style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '1px', height: '1px', opacity: 0, pointerEvents: 'none' }}
+        style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '640px', height: '360px', pointerEvents: 'none' }}
         autoPlay
         muted
         playsInline
