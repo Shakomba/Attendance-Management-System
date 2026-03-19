@@ -34,6 +34,7 @@ IF OBJECT_ID(N'dbo.SessionRecognitions', N'U') IS NOT NULL DROP TABLE dbo.Sessio
 IF OBJECT_ID(N'dbo.ClassSessions', N'U') IS NOT NULL DROP TABLE dbo.ClassSessions;
 IF OBJECT_ID(N'dbo.StudentFaceEmbeddings', N'U') IS NOT NULL DROP TABLE dbo.StudentFaceEmbeddings;
 IF OBJECT_ID(N'dbo.Enrollments', N'U') IS NOT NULL DROP TABLE dbo.Enrollments;
+IF OBJECT_ID(N'dbo.Professors', N'U') IS NOT NULL DROP TABLE dbo.Professors;
 IF OBJECT_ID(N'dbo.Courses', N'U') IS NOT NULL DROP TABLE dbo.Courses;
 IF OBJECT_ID(N'dbo.Students', N'U') IS NOT NULL DROP TABLE dbo.Students;
 GO
@@ -64,6 +65,20 @@ CREATE TABLE dbo.Courses
 );
 GO
 
+/* ---------- Professors (predefined accounts) ---------- */
+CREATE TABLE dbo.Professors
+(
+    ProfessorID   INT IDENTITY(1,1) PRIMARY KEY,
+    Username      NVARCHAR(50) NOT NULL UNIQUE,
+    PasswordHash  NVARCHAR(128) NOT NULL,
+    FullName      NVARCHAR(120) NOT NULL,
+    CourseID      INT NOT NULL,
+    IsActive      BIT NOT NULL CONSTRAINT DF_Professors_IsActive DEFAULT (1),
+    CreatedAt     DATETIME2(0) NOT NULL CONSTRAINT DF_Professors_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT FK_Professors_Course FOREIGN KEY (CourseID) REFERENCES dbo.Courses(CourseID)
+);
+GO
+
 /* ---------- Gradebook + automated formulas ---------- */
 CREATE TABLE dbo.Enrollments
 (
@@ -80,8 +95,8 @@ CREATE TABLE dbo.Enrollments
 
     HoursAbsentTotal  DECIMAL(8,2) NOT NULL CONSTRAINT DF_Enrollments_HoursAbsent DEFAULT (0),
 
-    /* Auto penalty: -0.25 for each absent hour */
-    AttendancePenalty AS CAST(HoursAbsentTotal * 0.25 AS DECIMAL(8,2)) PERSISTED,
+    /* Auto penalty: -0.5 for each absent hour */
+    AttendancePenalty AS CAST(HoursAbsentTotal * 0.5 AS DECIMAL(8,2)) PERSISTED,
 
     /* Raw sum of all grade components */
     RawTotal          AS CAST(
@@ -94,28 +109,28 @@ CREATE TABLE dbo.Enrollments
                           CASE
                               WHEN (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.25)) < 0
+                                  - (HoursAbsentTotal * 0.5)) < 0
                               THEN 0
                               ELSE (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.25))
+                                  - (HoursAbsentTotal * 0.5))
                           END AS DECIMAL(8,2)) PERSISTED,
 
     /* At-risk policy:
        1) failing grade (<60), OR
-       2) too many absences (>=8 hours; course-specific threshold shown in view)
+       2) too many absences (>=4 hours; course-specific threshold shown in view)
     */
     AtRisk            AS CAST(CASE WHEN (
                             CASE
                               WHEN (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.25)) < 0
+                                  - (HoursAbsentTotal * 0.5)) < 0
                               THEN 0
                               ELSE (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.25))
+                                  - (HoursAbsentTotal * 0.5))
                             END
-                          ) < 60 OR HoursAbsentTotal >= 8 THEN 1 ELSE 0 END AS BIT) PERSISTED,
+                          ) < 60 OR HoursAbsentTotal >= 4 THEN 1 ELSE 0 END AS BIT) PERSISTED,
 
     UpdatedAt         DATETIME2(0) NOT NULL CONSTRAINT DF_Enrollments_UpdatedAt DEFAULT (SYSUTCDATETIME()),
 
@@ -331,69 +346,57 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Status NVARCHAR(20);
-    DECLARE @CourseID INT;
-    DECLARE @StartAt DATETIME2(0);
-    DECLARE @EndAt DATETIME2(0);
+    DECLARE @Status      NVARCHAR(20);
+    DECLARE @CourseID    INT;
+    DECLARE @StartAt     DATETIME2(0);
+    DECLARE @EndAt       DATETIME2(0);
     DECLARE @DurationMinutes INT;
-    DECLARE @TotalHours INT;
+    DECLARE @TotalHours  INT;
+    DECLARE @GraceMinutes INT;
 
     SELECT
-        @Status = Status,
-        @CourseID = CourseID,
-        @StartAt = StartedAt,
-        @EndAt = EndedAt
-    FROM dbo.ClassSessions
-    WHERE SessionID = @SessionID;
+        @Status   = cs.Status,
+        @CourseID = cs.CourseID,
+        @StartAt  = cs.StartedAt,
+        @EndAt    = cs.EndedAt,
+        @GraceMinutes = c.LateGraceMinutes
+    FROM dbo.ClassSessions cs
+    INNER JOIN dbo.Courses c ON c.CourseID = cs.CourseID
+    WHERE cs.SessionID = @SessionID;
 
-    IF @CourseID IS NULL
-        RETURN;
-
-    IF @Status = N'finalized'
-        RETURN;
+    IF @CourseID IS NULL RETURN;
+    IF @Status = N'finalized' RETURN;
 
     SET @EndAt = ISNULL(@EndAt, SYSUTCDATETIME());
 
     UPDATE dbo.ClassSessions
-    SET EndedAt = @EndAt,
-        Status = N'finalized'
+    SET EndedAt = @EndAt, Status = N'finalized'
     WHERE SessionID = @SessionID;
 
     SET @DurationMinutes = DATEDIFF(MINUTE, @StartAt, @EndAt);
     IF @DurationMinutes <= 0 SET @DurationMinutes = 1;
-
     SET @TotalHours = CEILING(@DurationMinutes / 60.0);
     IF @TotalHours < 1 SET @TotalHours = 1;
 
+    /* Ensure every enrolled student has a SessionAttendance row */
     INSERT INTO dbo.SessionAttendance (SessionID, StudentID, IsPresent, IsLate, ArrivalDelayMinutes)
-    SELECT
-        @SessionID,
-        e.StudentID,
-        0,
-        0,
-        NULL
+    SELECT @SessionID, e.StudentID, 0, 0, NULL
     FROM dbo.Enrollments e
     LEFT JOIN dbo.SessionAttendance sa
         ON sa.SessionID = @SessionID AND sa.StudentID = e.StudentID
     WHERE e.CourseID = @CourseID
       AND sa.SessionID IS NULL;
 
+    /* Fill SessionHourLog (audit trail — absent entries only for missing slots) */
     ;WITH HourSeries AS
     (
         SELECT 0 AS HourIndex
         UNION ALL
-        SELECT HourIndex + 1
-        FROM HourSeries
-        WHERE HourIndex + 1 < @TotalHours
+        SELECT HourIndex + 1 FROM HourSeries WHERE HourIndex + 1 < @TotalHours
     )
     INSERT INTO dbo.SessionHourLog (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
-    SELECT
-        @SessionID,
-        e.StudentID,
-        h.HourIndex,
-        DATEADD(HOUR, h.HourIndex, @StartAt) AS HourStart,
-        0,
-        N'system'
+    SELECT @SessionID, e.StudentID, h.HourIndex,
+           DATEADD(HOUR, h.HourIndex, @StartAt), 0, N'system'
     FROM dbo.Enrollments e
     CROSS JOIN HourSeries h
     LEFT JOIN dbo.SessionHourLog hl
@@ -404,23 +407,54 @@ BEGIN
       AND hl.SessionID IS NULL
     OPTION (MAXRECURSION 512);
 
-    ;WITH SessionAbsence AS
+    /*
+        Compute per-hour absence weight using FirstSeenAt + persistence fix:
+          - NULL (never arrived)               → 1.0 per hour
+          - arrived before this hour started   → 0.0 (already present)
+          - arrived within grace window        → 0.5 (Late)
+          - arrived after grace window         → 1.0 (Absent)
+    */
+    ;WITH HourSeries AS
+    (
+        SELECT 0 AS HourIndex
+        UNION ALL
+        SELECT HourIndex + 1 FROM HourSeries WHERE HourIndex + 1 < @TotalHours
+    ),
+    StudentHourWeights AS
     (
         SELECT
-            hl.StudentID,
-            SUM(CASE WHEN hl.IsPresent = 0 THEN 1 ELSE 0 END) AS AbsentHours
-        FROM dbo.SessionHourLog hl
-        WHERE hl.SessionID = @SessionID
-        GROUP BY hl.StudentID
+            e.StudentID,
+            CAST(
+                CASE
+                    WHEN sa.FirstSeenAt IS NULL
+                        THEN 1.0
+                    WHEN sa.FirstSeenAt <= DATEADD(HOUR, h.HourIndex, @StartAt)
+                        THEN 0.0
+                    WHEN sa.FirstSeenAt <= DATEADD(MINUTE, @GraceMinutes,
+                                              DATEADD(HOUR, h.HourIndex, @StartAt))
+                        THEN 0.5
+                    ELSE 1.0
+                END
+            AS DECIMAL(3,1)) AS AbsenceWeight
+        FROM dbo.Enrollments e
+        CROSS JOIN HourSeries h
+        LEFT JOIN dbo.SessionAttendance sa
+            ON sa.SessionID = @SessionID AND sa.StudentID = e.StudentID
+        WHERE e.CourseID = @CourseID
+    ),
+    StudentTotals AS
+    (
+        SELECT StudentID, SUM(AbsenceWeight) AS TotalAbsentWeight
+        FROM StudentHourWeights
+        GROUP BY StudentID
     )
     UPDATE e
-    SET
-        e.HoursAbsentTotal = e.HoursAbsentTotal + ISNULL(sa.AbsentHours, 0),
+    SET e.HoursAbsentTotal = e.HoursAbsentTotal + ISNULL(st.TotalAbsentWeight, 0),
         e.UpdatedAt = SYSUTCDATETIME()
     FROM dbo.Enrollments e
-    INNER JOIN SessionAbsence sa
-        ON sa.StudentID = e.StudentID
-    WHERE e.CourseID = @CourseID;
+    INNER JOIN StudentTotals st ON st.StudentID = e.StudentID
+    WHERE e.CourseID = @CourseID
+    OPTION (MAXRECURSION 512);
 END
 GO
 
@@ -465,6 +499,12 @@ GO
 /* ---------- Starter seed data ---------- */
 INSERT INTO dbo.Courses (CourseCode, CourseName, ScheduledStartTime, LateGraceMinutes, MaxAllowedAbsentHours)
 VALUES
-    (N'CS101', N'Distributed AI Systems', '09:00:00', 10, 8),
-    (N'CS102', N'Applied Machine Vision', '13:00:00', 10, 8);
+    (N'CS101', N'Distributed AI Systems', '09:00:00', 10, 4),
+    (N'CS102', N'Applied Machine Vision', '13:00:00', 10, 4);
+GO
+
+-- Password: admin123  (SHA-256 hash)
+INSERT INTO dbo.Professors (Username, PasswordHash, FullName, CourseID)
+VALUES
+    (N'dr.ahmed', N'240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', N'Dr. Ahmed Hassan', 1);
 GO

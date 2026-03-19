@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -48,17 +48,23 @@ class FaceEngine:
         else:
             try:
                 from insightface.app import FaceAnalysis  # type: ignore
+                import onnxruntime as ort  # type: ignore
             except Exception as exc:  # pragma: no cover
                 raise RuntimeError(
                     "GPU mode requires insightface + onnxruntime-gpu. Install backend requirements first."
                 ) from exc
 
-            # CUDA provider first, CPU provider fallback
+            providers = ort.get_available_providers()
+            if "CUDAExecutionProvider" not in providers:
+                raise RuntimeError(
+                    f"GPU mode requested but CUDAExecutionProvider is unavailable. Providers: {providers}"
+                )
+
             self.face_analysis = FaceAnalysis(
                 name="buffalo_l",
-                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+                providers=["CUDAExecutionProvider"],
             )
-            self.face_analysis.prepare(ctx_id=0, det_size=(640, 640))
+            self.face_analysis.prepare(ctx_id=0, det_thresh=0.35, det_size=(960, 960))
             self.model_name = "insightface-512"
 
     @staticmethod
@@ -107,6 +113,7 @@ class FaceEngine:
             return detections
 
         faces = self.face_analysis.get(frame_bgr)
+
         if not faces:
             return detections
 

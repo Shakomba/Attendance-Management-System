@@ -17,6 +17,8 @@ from .schemas import (
     FinalizeSessionResponse,
     GradeUpdateRequest,
     GenericMessage,
+    LoginRequest,
+    LoginResponse,
     ManualAttendanceUpdateRequest,
     StartSessionRequest,
     StartSessionResponse,
@@ -72,6 +74,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest) -> LoginResponse:
+    result = repo.authenticate_professor(payload.username, payload.password)
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    return LoginResponse(**result)
 
 
 @app.get("/api/health")
@@ -131,15 +141,6 @@ def update_student_grades(course_id: int, student_id: int, payload: GradeUpdateR
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return GenericMessage(message="Grades updated.", data=updated)
-
-
-@app.get("/api/debug/courses/{course_id}/embedding-count")
-def get_embedding_count(course_id: int) -> dict:
-    if not face_engine:
-        return {"course_id": course_id, "model_name": None, "count": 0}
-
-    rows = repo.list_known_embeddings(course_id, face_engine.model_name)
-    return {"course_id": course_id, "model_name": face_engine.model_name, "count": len(rows)}
 
 
 @app.post("/api/sessions/start", response_model=StartSessionResponse)
@@ -231,69 +232,78 @@ async def dashboard_ws(websocket: WebSocket, session_id: str) -> None:
 
 
 _recognition_locks: dict = {}
+_latest_frames: dict = {}
 
 
-async def _run_recognition(raw_bytes: bytes, sid: str) -> None:
-    """Run face recognition in a background task without blocking frame relay."""
+async def _run_recognition(sid: str) -> None:
+    """Run recognition on the latest available frame for a session."""
     try:
-        frame = await asyncio.to_thread(face_engine.decode_image_bytes, raw_bytes)
-        if frame is None:
-            return
+        while True:
+            raw_bytes = _latest_frames.pop(sid, None)
+            if raw_bytes is None:
+                break
 
-        recognized_at = datetime.now(timezone.utc)
-        frame_result = await asyncio.to_thread(
-            recognition_service.process_frame,
-            sid,
-            frame,
-            recognized_at,
-        )
+            frame = await asyncio.to_thread(face_engine.decode_image_bytes, raw_bytes)
+            if frame is None:
+                continue
 
-        await ws_manager.broadcast_dashboard(
-            sid,
-            {
-                "type": "overlay",
-                "payload": {
-                    "frame_width": int(frame.shape[1]),
-                    "frame_height": int(frame.shape[0]),
-                    "faces": [
-                        {
-                            "event_type": item.event_type,
-                            "student_id": item.student_id,
-                            "full_name": item.full_name,
-                            "confidence": item.confidence,
-                            "left": item.left,
-                            "top": item.top,
-                            "right": item.right,
-                            "bottom": item.bottom,
-                            "engine_mode": item.engine_mode,
-                        }
-                        for item in frame_result.overlays
-                    ],
-                },
-            },
-        )
+            recognized_at = datetime.now(timezone.utc)
+            frame_result = await asyncio.to_thread(
+                recognition_service.process_frame,
+                sid,
+                frame,
+                recognized_at,
+            )
 
-        for recognition_event in frame_result.notifications:
             await ws_manager.broadcast_dashboard(
                 sid,
                 {
-                    "type": "presence",
+                    "type": "overlay",
                     "payload": {
-                        "student_id": recognition_event.student_id,
-                        "event_type": recognition_event.event_type,
-                        "full_name": recognition_event.full_name,
-                        "confidence": recognition_event.confidence,
-                        "is_late": recognition_event.is_late,
-                        "arrival_delay_minutes": recognition_event.arrival_delay_minutes,
-                        "recognized_at": recognition_event.recognized_at,
-                        "engine_mode": recognition_event.engine_mode,
+                        "frame_width": int(frame.shape[1]),
+                        "frame_height": int(frame.shape[0]),
+                        "faces": [
+                            {
+                                "event_type": item.event_type,
+                                "student_id": item.student_id,
+                                "full_name": item.full_name,
+                                "confidence": item.confidence,
+                                "left": item.left,
+                                "top": item.top,
+                                "right": item.right,
+                                "bottom": item.bottom,
+                                "engine_mode": item.engine_mode,
+                            }
+                            for item in frame_result.overlays
+                        ],
                     },
                 },
             )
+
+            for recognition_event in frame_result.notifications:
+                await ws_manager.broadcast_dashboard(
+                    sid,
+                    {
+                        "type": "presence",
+                        "payload": {
+                            "student_id": recognition_event.student_id,
+                            "event_type": recognition_event.event_type,
+                            "full_name": recognition_event.full_name,
+                            "confidence": recognition_event.confidence,
+                            "is_late": recognition_event.is_late,
+                            "arrival_delay_minutes": recognition_event.arrival_delay_minutes,
+                            "recognized_at": recognition_event.recognized_at,
+                            "engine_mode": recognition_event.engine_mode,
+                        },
+                    },
+                )
     except Exception:
         pass
     finally:
         _recognition_locks[sid] = False
+        if _latest_frames.get(sid) is not None and not _recognition_locks.get(sid, False):
+            _recognition_locks[sid] = True
+            asyncio.create_task(_run_recognition(sid))
 
 
 @app.websocket("/ws/camera/{session_id}")
@@ -342,7 +352,9 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
             if frame_count % max(settings.recognition_frame_stride, 1) != 0:
                 continue
 
-            # Skip if previous recognition is still running
+            _latest_frames[session_id] = raw_bytes
+
+            # Skip scheduling if previous recognition is still running.
             if _recognition_locks.get(session_id, False):
                 continue
 
@@ -360,13 +372,15 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
                         },
                     )
 
-            # Fire recognition as background task — does NOT block frame relay
+            # Fire recognition as background task — does NOT block frame relay.
             _recognition_locks[session_id] = True
-            asyncio.create_task(_run_recognition(raw_bytes, session_id))
+            asyncio.create_task(_run_recognition(session_id))
 
     except WebSocketDisconnect:
+        _latest_frames.pop(session_id, None)
         ws_manager.disconnect_camera(session_id, websocket)
     except Exception as exc:
+        _latest_frames.pop(session_id, None)
         ws_manager.disconnect_camera(session_id, websocket)
         await ws_manager.broadcast_dashboard(
             session_id,

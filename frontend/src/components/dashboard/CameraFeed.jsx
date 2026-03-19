@@ -1,79 +1,66 @@
-import { useEffect, useRef } from 'react'
-import { cn } from '../../lib/utils'
+import { Activity, VideoOff } from 'lucide-react'
 
-export function CameraFeed({
-    cameraRunning,
-    viewportRef,
-    frameCanvasRef,
-    overlayCanvasRef,
-    streamMetrics
+export function CameraFeed({ 
+  cameraRunning, 
+  viewportRef, 
+  frameCanvasRef, 
+  overlayCanvasRef, 
+  streamMetrics,
+  toggleCamera,
+  sessionId
 }) {
-    return (
-        <article className="standard-card flex flex-col min-h-[400px]">
-            <header className="p-4 flex flex-col xl:flex-row xl:items-center justify-between border-b gap-3 border-slate-200 dark:border-slate-800">
-                <div className="flex flex-col">
-                    <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                        <span className="relative flex h-2.5 w-2.5">
-                            {cameraRunning && (
-                                <>
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                                </>
-                            )}
-                            {!cameraRunning && (
-                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-300 dark:bg-slate-700"></span>
-                            )}
-                        </span>
-                        Live Camera Feed
-                    </h2>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Automated attendance scanning</p>
-                </div>
-                {streamMetrics && (
-                    <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] font-semibold text-slate-500 dark:text-slate-400 xl:justify-end">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" title="Incoming network frames per second">IN: {streamMetrics.incomingFps} FPS</span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" title="Locally drawn frames per second">DRAW: {streamMetrics.drawFps} FPS</span>
-                        {(streamMetrics.renderDrops > 0 || streamMetrics.outgoingDrops > 0) && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-200 dark:border-rose-800" title="Frames dropped locally or on network">DROP: {streamMetrics.renderDrops + streamMetrics.outgoingDrops}</span>
-                        )}
-                    </div>
-                )}
-            </header>
-
-            <div className="relative flex-1 p-3 bg-slate-50 dark:bg-slate-900 rounded-b-xl overflow-hidden">
-                <div
-                    ref={viewportRef}
-                    className={cn(
-                        "relative w-full h-[55vh] min-h-[350px] overflow-hidden rounded-lg border",
-                        "bg-black transition-colors duration-300",
-                        cameraRunning ? "border-emerald-500/30 shadow-sm" : "border-slate-300 dark:border-slate-800"
-                    )}
-                >
-                    {/* Frame Canvas */}
-                    <canvas
-                        ref={frameCanvasRef}
-                        className="absolute inset-0 h-full w-full object-contain"
-                        aria-label="Live frame"
-                    />
-
-                    {/* Overlay Canvas */}
-                    <canvas
-                        ref={overlayCanvasRef}
-                        className="absolute inset-0 h-full w-full object-contain pointer-events-none z-20"
-                        aria-hidden="true"
-                    />
-
-                    {/* Idle State */}
-                    {!cameraRunning && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-slate-900 z-30">
-                            <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-4 text-slate-400">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m2 2 20 20" /><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83" /><path d="M13.87 13.87a2 2 0 0 1-2.82-2.82" /><path d="M17.41 17.41a2 2 0 1 0-2.83-2.83" /><path d="M2.06 2.06a2 2 0 0 0 2.83 2.83" /><path d="M22 8v10a2 2 0 0 1-2 2H4" /><path d="M6 14v4" /><path d="M14 14v4" /></svg>
-                            </div>
-                            <h3 className="text-lg font-medium text-slate-200">Camera Offline</h3>
-                            <p className="mt-1 text-sm text-slate-400 max-w-sm">Turn on the camera to begin scanning students.</p>
-                        </div>
-                    )}
-                </div>
+  return (
+    <div className="standard-card flex flex-col h-[500px]">
+      <div className="px-6 py-4 border-b border-border bg-surface flex items-center justify-between">
+        <label
+          className={`flex items-center gap-3 cursor-pointer user-select-none ${!sessionId ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          <span className="text-sm font-semibold tracking-tight uppercase text-primary">
+            Camera
+          </span>
+          <div className={`relative h-5 w-9 transition-colors border border-fg ${cameraRunning ? 'bg-fg' : 'bg-surface'}`}>
+            <div className={`absolute top-[2px] left-[2px] h-[14px] w-[14px] transition-transform duration-200 ${cameraRunning ? 'translate-x-[18px] bg-bg' : 'bg-fg'}`}></div>
+          </div>
+          <input
+            type="checkbox"
+            className="sr-only"
+            checked={cameraRunning}
+            onChange={toggleCamera}
+            disabled={!sessionId}
+          />
+        </label>
+        
+        {cameraRunning && (
+          <div className="flex items-center gap-3">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-40"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-black"></span>
+            </span>
+            <span className="text-xs font-mono text-secondary">
+              {streamMetrics?.fps || 0} FPS · {streamMetrics?.latency || 0}ms
+            </span>
+          </div>
+        )}
+      </div>
+      
+      <div className="flex-1 bg-[#09090B] relative overflow-hidden">
+        {!cameraRunning && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/30 z-10 font-mono text-sm gap-2">
+                <VideoOff size={32} />
+                <span>Stream Inactive</span>
             </div>
-        </article>
-    )
+        )}
+        <div ref={viewportRef} className="absolute inset-0">
+          <canvas 
+            ref={frameCanvasRef} 
+            className="absolute inset-0 w-full h-full"
+          />
+          <canvas 
+            ref={overlayCanvasRef} 
+            className="absolute inset-0 w-full h-full pointer-events-none"
+          />
+        </div>
+      </div>
+    </div>
+  )
 }

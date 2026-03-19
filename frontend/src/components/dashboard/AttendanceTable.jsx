@@ -1,96 +1,117 @@
-import { cn } from '../../lib/utils'
+import { Check, X, HelpCircle, Loader2, Clock } from 'lucide-react'
 
-export function AttendanceTable({
-    attendance,
-    sessionId,
-    markManualAttendance,
-    attendanceBusyByStudent
-}) {
+export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessionEndTime, markManualAttendance, attendanceBusyByStudent }) {
+  const sessionEnded = !sessionId && !!sessionEndTime
+
+  if (!sessionId && !sessionEndTime) {
     return (
-        <article className="standard-card flex flex-col min-h-[300px] h-full">
-            <header className="p-4 border-b border-slate-200 dark:border-slate-800">
-                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">
-                    Attendance Log
-                </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Current session check-ins</p>
-            </header>
-
-            <div className="flex-1 overflow-auto scroll-slim">
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                    <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-                        <tr className="text-slate-500 dark:text-slate-400 font-medium text-xs">
-                            <th className="px-5 py-3 rounded-tl-lg">Student</th>
-                            <th className="px-5 py-3">Status</th>
-                            <th className="px-5 py-3 rounded-tr-lg">Manual Entry</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                        {attendance.map((row) => {
-                            const isRowBusy = Boolean(attendanceBusyByStudent[row.StudentID])
-                            const isAbsent = !row.IsPresent
-                            const isLate = Boolean(row.IsPresent && row.IsLate)
-
-                            return (
-                                <tr
-                                    key={`${row.StudentID}-${row.FullName}`}
-                                    className={cn(
-                                        "group transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                                        isAbsent && "bg-rose-50/50 dark:bg-rose-900/10",
-                                        isLate && "bg-amber-50/50 dark:bg-amber-900/10"
-                                    )}
-                                >
-                                    <td className="px-5 py-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className={cn(
-                                                "w-7 h-7 rounded-full flex items-center justify-center font-semibold text-xs",
-                                                isAbsent ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400" :
-                                                    isLate ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400" :
-                                                        "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400"
-                                            )}>
-                                                {row.FullName.charAt(0)}
-                                            </div>
-                                            <span className="font-medium text-slate-900 dark:text-slate-200">{row.FullName}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3">
-                                        {isAbsent ? (
-                                            <span className="px-2.5 py-1 text-xs font-medium rounded-md badge-danger">Absent</span>
-                                        ) : isLate ? (
-                                            <span className="px-2.5 py-1 text-xs font-medium rounded-md badge-warning">Late ({row.ArrivalDelayMinutes ?? '-'}m)</span>
-                                        ) : (
-                                            <span className="px-2.5 py-1 text-xs font-medium rounded-md badge-success">Present</span>
-                                        )}
-                                    </td>
-                                    <td className="px-5 py-3">
-                                        <div className="flex gap-2">
-                                            <select
-                                                className="standard-input text-xs py-1.5 px-2 rounded-md font-medium text-slate-700 dark:text-slate-300"
-                                                disabled={!sessionId || isRowBusy}
-                                                value={isAbsent ? 'absent' : isLate ? 'late' : 'present'}
-                                                onChange={(e) => markManualAttendance(row.StudentID, row.FullName, e.target.value)}
-                                            >
-                                                <option value="present">Mark Present</option>
-                                                <option value="late">Mark Late</option>
-                                                <option value="absent">Mark Absent</option>
-                                            </select>
-                                        </div>
-                                    </td>
-                                </tr>
-                            )
-                        })}
-
-                        {!attendance.length && (
-                            <tr>
-                                <td colSpan={3} className="px-5 py-16 text-center text-slate-500 dark:text-slate-400">
-                                    <div className="flex flex-col items-center justify-center gap-2">
-                                        <span className="text-sm">No students recorded yet. Turn on the camera to begin.</span>
-                                    </div>
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        </article>
+      <div className="standard-card flex flex-col items-center justify-center h-full min-h-[300px] text-secondary">
+        <HelpCircle size={48} className="mb-4 opacity-20" />
+        <p>No active session found</p>
+      </div>
     )
+  }
+
+  return (
+    <div className="standard-card flex flex-col h-full">
+      <div className="px-6 py-4 border-b border-border bg-surface">
+        <div className="flex items-center gap-2 text-xs font-mono text-secondary">
+          {sessionStartTime && (
+            <span>Started <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span></span>
+          )}
+          {sessionEnded && sessionEndTime && (
+            <>
+              <span className="opacity-40">·</span>
+              <span>Ended <span className="text-primary">{sessionEndTime.toLocaleTimeString()}</span></span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto max-h-[500px]">
+        {attendance.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-32 text-secondary text-sm">
+            No students registered for this course.
+          </div>
+        ) : (
+          <table className="w-full text-left text-sm whitespace-nowrap">
+            <thead className="sticky top-0 bg-bg border-b border-border text-secondary text-xs uppercase z-10 hidden sm:table-header-group">
+              <tr>
+                <th className="px-6 py-3 font-medium">Student</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Arrived</th>
+                {!sessionEnded && <th className="px-6 py-3 font-medium text-right">Overrides</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {attendance.map((row) => {
+                const busy = !sessionEnded && attendanceBusyByStudent[row.StudentID]
+                const present = row.IsPresent
+                const late = present && row.IsLate
+
+                return (
+                  <tr key={row.StudentID} className="hover:bg-surface transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <div className="font-semibold text-primary">{row.FullName}</div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-6 py-4 hidden sm:table-cell">
+                      {late ? (
+                        <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-amber-500/40 bg-amber-500/10 text-amber-500 w-24">
+                          <Clock size={12} /> Late
+                        </span>
+                      ) : present ? (
+                        <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-border bg-black text-white w-24">
+                          <Check size={12} /> Present
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-border bg-surface text-secondary w-24">
+                          <X size={12} /> Absent
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-6 py-4 text-xs font-mono text-secondary hidden sm:table-cell">
+                      {present && row.FirstSeenAt ? new Date(row.FirstSeenAt).toLocaleTimeString() : '-'}
+                    </td>
+
+                    {!sessionEnded && (
+                      <td className="px-6 py-4 text-right">
+                        {busy ? (
+                          <Loader2 size={16} className="animate-spin inline-block text-secondary" />
+                        ) : (
+                          <div className="flex justify-end gap-2">
+                            <button
+                              disabled={present}
+                              onClick={() => markManualAttendance(row.StudentID, row.FullName, "present")}
+                              className="p-1.5 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                              title="Mark Present"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              disabled={!present}
+                              onClick={() => markManualAttendance(row.StudentID, row.FullName, "absent")}
+                              className="p-1.5 rounded-sm border border-border text-secondary hover:bg-surface disabled:opacity-30 transition-all"
+                              title="Mark Absent"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
 }

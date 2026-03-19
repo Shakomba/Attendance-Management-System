@@ -5,6 +5,7 @@ import { useSession } from "./hooks/useSession";
 import { useCamera } from "./hooks/useCamera";
 import { useDashboardSocket } from "./hooks/useDashboardSocket";
 
+import { LoginPage } from "./components/LoginPage";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { StatCards } from "./components/dashboard/StatCards";
 import { CameraFeed } from "./components/dashboard/CameraFeed";
@@ -14,20 +15,22 @@ import { cn } from "./lib/utils";
 
 const DASH_DRAW_FPS = 30;
 
-// Utility for scaling overlay
-function containRect(sourceW, sourceH, targetW, targetH) {
+// Cover: scale to fill the target, cropping the overflow (no black bars)
+function coverRect(sourceW, sourceH, targetW, targetH) {
   if (!sourceW || !sourceH || !targetW || !targetH)
     return { x: 0, y: 0, w: targetW || 0, h: targetH || 0 };
   const sourceRatio = sourceW / sourceH;
   const targetRatio = targetW / targetH;
   if (sourceRatio > targetRatio) {
-    const w = targetW;
-    const h = w / sourceRatio;
-    return { x: 0, y: (targetH - h) / 2, w, h };
+    // source is wider — match heights, overflow horizontally
+    const h = targetH;
+    const w = h * sourceRatio;
+    return { x: (targetW - w) / 2, y: 0, w, h };
   }
-  const h = targetH;
-  const w = h * sourceRatio;
-  return { x: (targetW - w) / 2, y: 0, w, h };
+  // source is taller — match widths, overflow vertically
+  const w = targetW;
+  const h = w / sourceRatio;
+  return { x: 0, y: (targetH - h) / 2, w, h };
 }
 
 function parseGradeValue(value) {
@@ -43,17 +46,40 @@ function gradeDraftFromRow(row) {
     assignment: Number(row.AssignmentGrade ?? 0).toFixed(2),
     midterm: Number(row.MidtermGrade ?? 0).toFixed(2),
     final_exam: Number(row.FinalExamGrade ?? 0).toFixed(2),
+    hours_absent: Number(row.HoursAbsentTotal ?? 0).toFixed(1),
   };
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem("ams_theme");
-    if (saved === "light" || saved === "dark") return saved;
+    if (localStorage.getItem("ams_theme_manual") === "true") {
+      const saved = localStorage.getItem("ams_theme");
+      if (saved === "light" || saved === "dark") return saved;
+    }
     return window.matchMedia("(prefers-color-scheme: dark)").matches
       ? "dark"
       : "light";
   });
+
+  const [professor, setProfessor] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ams_professor");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLogin = (data) => {
+    localStorage.setItem("ams_professor", JSON.stringify(data));
+    setProfessor(data);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("ams_professor");
+    setProfessor(null);
+  };
 
   // Global Hooks
   const { apiBase, apiFetch, courses, courseId, setCourseId, loadBootstrap, health } =
@@ -90,6 +116,8 @@ export default function App() {
   const [gradeEditor, setGradeEditor] = useState(null);
   const [gradeBusyByStudent, setGradeBusyByStudent] = useState({});
   const [attendanceBusyByStudent, setAttendanceBusyByStudent] = useState({});
+  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [sessionEndTime, setSessionEndTime] = useState(null);
   const [streamMetrics, setStreamMetrics] = useState({
     incomingFps: 0,
     drawFps: 0,
@@ -106,7 +134,7 @@ export default function App() {
   const enrolledCount = attendance ? attendance.length : gradebook.length;
   const presentCount = attendance.filter((r) => r.IsPresent).length;
   const lateCount = attendance.filter((r) => r.IsPresent && r.IsLate).length;
-  const atRiskCount = gradebook.filter((r) => r.AtRiskByPolicy).length;
+  const absentCount = sessionId ? attendance.filter((r) => !r.IsPresent).length : 0;
 
   const renderRef = useRef({
     pendingFrame: null,
@@ -119,11 +147,40 @@ export default function App() {
     droppedWindow: 0,
   });
 
-  // Theme Sync
+  // Theme: follow prefers-color-scheme unless the user has toggled manually
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("ams_theme", theme);
+    if (localStorage.getItem("ams_theme_manual") === "true") {
+      localStorage.setItem("ams_theme", theme);
+    }
   }, [theme]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      if (localStorage.getItem("ams_theme_manual") === "true") return;
+      setTheme(mq.matches ? "dark" : "light");
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      localStorage.setItem("ams_theme_manual", "true");
+      localStorage.setItem("ams_theme", next);
+      return next;
+    });
+  }, []);
+
+  // Sync course from logged-in professor
+  useEffect(() => {
+    if (professor?.course_id) {
+      setCourseId(String(professor.course_id));
+    }
+  }, [professor, setCourseId]);
 
   // Bootstrap & Polling
   useEffect(() => {
@@ -179,13 +236,13 @@ export default function App() {
     ctx.clearRect(0, 0, cssW, cssH);
 
     const payload = overlayRef.current;
-    if (!payload?.faces?.length) return;
+    if (!payload?.faces?.length || !cameraActiveRef.current) return;
 
     const sourceW = payload.frameWidth || renderRef.current.lastImageWidth;
     const sourceH = payload.frameHeight || renderRef.current.lastImageHeight;
     if (!sourceW || !sourceH) return;
 
-    const fit = containRect(sourceW, sourceH, cssW, cssH);
+    const fit = coverRect(sourceW, sourceH, cssW, cssH);
     for (const face of payload.faces) {
       const left = fit.x + (Number(face.left || 0) / sourceW) * fit.w;
       const top = fit.y + (Number(face.top || 0) / sourceH) * fit.h;
@@ -219,7 +276,7 @@ export default function App() {
       ctx.fillStyle = "#ffffff";
       ctx.fillText(label, tagX + padX, tagY + 16);
     }
-  }, [syncCanvas, overlayRef]);
+  }, [syncCanvas, overlayRef, cameraActiveRef]);
 
   const drawFrame = useCallback(
     (img) => {
@@ -231,8 +288,6 @@ export default function App() {
       if (!ctx) return;
       const { cssW, cssH, dpr } = info;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#020617";
-      ctx.fillRect(0, 0, cssW, cssH);
 
       const sourceW = img.videoWidth || img.naturalWidth || img.width;
       const sourceH = img.videoHeight || img.naturalHeight || img.height;
@@ -241,7 +296,10 @@ export default function App() {
       renderRef.current.lastImageWidth = sourceW;
       renderRef.current.lastImageHeight = sourceH;
 
-      const fit = containRect(sourceW, sourceH, cssW, cssH);
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      const fit = coverRect(sourceW, sourceH, cssW, cssH);
       ctx.drawImage(img, fit.x, fit.y, fit.w, fit.h);
       drawOverlay();
     },
@@ -259,11 +317,16 @@ export default function App() {
       ctx.setTransform(info.dpr, 0, 0, info.dpr, 0, 0);
       ctx.clearRect(0, 0, info.cssW, info.cssH);
       if (canvas === frameCanvasRef.current) {
-        ctx.fillStyle = "#0f172a";
+        ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, info.cssW, info.cssH);
       }
     }
   }, [syncCanvas, overlayRef]);
+
+  // Clear canvas to black whenever camera is turned off
+  useEffect(() => {
+    if (!cameraRunning) clearFrameCanvases();
+  }, [cameraRunning, clearFrameCanvases]);
 
   const applyPresenceToAttendance = useCallback(
     (presencePayload) => {
@@ -337,7 +400,10 @@ export default function App() {
   const handleStartSession = async () => {
     if (!courseId) return appendEvent("warning", "Select a course first");
     try {
+      const now = new Date();
       const sid = await apiStartSession();
+      setSessionStartTime(now);
+      setSessionEndTime(null);
       clearFrameCanvases();
       if (cameraActiveRef.current) stopCamera();
       connectDashboardSocket(sid, {
@@ -348,16 +414,18 @@ export default function App() {
       });
       await Promise.all([refreshAttendance(sid), loadGradebook()]);
       await startCamera(sid, appendEvent);
-      appendEvent("success", `Session started for course ${courseId}`);
+      appendEvent("success", `Session started at ${now.toLocaleTimeString()} for course ${courseId}`);
     } catch (err) { }
   };
 
   const handleFinalizeSession = async () => {
     try {
+      const endedAt = new Date();
       const result = await apiFinalizeSession();
+      setSessionEndTime(endedAt);
       appendEvent(
         "success",
-        `Session finalized. Emails sent=${result?.emails_sent}, failed=${result?.email_failures}`,
+        `Session ended at ${endedAt.toLocaleTimeString()}. Emails sent=${result?.emails_sent}, failed=${result?.email_failures}`,
       );
       await Promise.all([loadGradebook(), refreshAttendance()]);
       stopCamera();
@@ -376,11 +444,19 @@ export default function App() {
         "warning",
         "Start a session before marking attendance",
       );
+    // Auto-upgrade "present" to "late" if student is being marked more than 5 min after session start
+    const effectiveMode =
+      mode === "present" && sessionStartTime && Date.now() - sessionStartTime.getTime() > 5 * 60 * 1000
+        ? "late"
+        : mode;
+    const delayMinutes = sessionStartTime
+      ? Math.round((Date.now() - sessionStartTime.getTime()) / 60000)
+      : 0;
     const payload =
-      mode === "absent"
+      effectiveMode === "absent"
         ? { is_present: false, is_late: false }
-        : mode === "late"
-          ? { is_present: true, is_late: true, arrival_delay_minutes: 11 }
+        : effectiveMode === "late"
+          ? { is_present: true, is_late: true, arrival_delay_minutes: delayMinutes }
           : { is_present: true, is_late: false };
     setAttendanceBusyByStudent((prev) => ({ ...prev, [studentId]: true }));
     try {
@@ -389,7 +465,7 @@ export default function App() {
         { method: "PATCH", body: JSON.stringify(payload) },
       );
       await refreshAttendance();
-      appendEvent("success", `Attendance marked ${mode} for ${fullName}`);
+      appendEvent("success", `Attendance marked ${effectiveMode} for ${fullName}`);
     } catch (err) {
       appendEvent("error", `Manual attendance update failed: ${err.message}`);
     } finally {
@@ -411,6 +487,7 @@ export default function App() {
       assignment: parseGradeValue(gradeEditor.values.assignment),
       midterm: parseGradeValue(gradeEditor.values.midterm),
       final_exam: parseGradeValue(gradeEditor.values.final_exam),
+      hours_absent_total: parseGradeValue(gradeEditor.values.hours_absent),
     };
     setGradeBusyByStudent((prev) => ({ ...prev, [studentId]: true }));
     try {
@@ -443,176 +520,37 @@ export default function App() {
     );
   };
 
+  if (!professor) {
+    return <LoginPage apiBase={apiBase} onLogin={handleLogin} />;
+  }
+
   return (
     <DashboardLayout
-      header={
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
-                Attendance Management
-                <span className="text-xs font-medium px-2.5 py-1 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300 border border-sky-200 dark:border-sky-800 uppercase tracking-wide">
-                  AI: {health?.ai_mode || '-'} ({health?.ai_model || '-'})
-                </span>
-              </h1>
-              <p className="text-sm text-slate-500 mt-1 dark:text-slate-400">
-                Classroom administration and grade tracking
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                className="w-9 h-9 flex items-center justify-center rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm text-slate-600 dark:text-slate-400"
-                onClick={() =>
-                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
-                }
-                title="Toggle Theme"
-              >
-                {theme === "dark" ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="4" />
-                    <path d="M12 2v2" />
-                    <path d="M12 20v2" />
-                    <path d="m4.93 4.93 1.41 1.41" />
-                    <path d="m17.66 17.66 1.41 1.41" />
-                    <path d="M2 12h2" />
-                    <path d="M20 12h2" />
-                    <path d="m6.34 17.66-1.41 1.41" />
-                    <path d="m19.07 4.93-1.41 1.41" />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-12 items-end">
-            <label className="lg:col-span-5 relative">
-              <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Active Course
-              </span>
-              <div className="relative">
-                <select
-                  className="w-full h-10 appearance-none rounded-md standard-input pl-3 pr-10 py-2 text-sm text-slate-900 dark:text-slate-100 font-medium cursor-pointer"
-                  value={courseId}
-                  onChange={(e) => setCourseId(e.target.value)}
-                >
-                  {courses.map((course) => (
-                    <option
-                      key={course.CourseID}
-                      value={String(course.CourseID)}
-                    >
-                      {course.CourseCode} - {course.CourseName}
-                    </option>
-                  ))}
-                  {!courses.length && (
-                    <option value="">Loading courses...</option>
-                  )}
-                </select>
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="absolute right-3 top-3 text-slate-500 pointer-events-none"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </div>
-            </label>
-
-            <div className="lg:col-span-7 flex flex-wrap gap-3 justify-end items-center h-10">
-              <label
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 rounded-md border cursor-pointer transition-colors user-select-none",
-                  sessionId
-                    ? "border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    : "border-transparent opacity-50 cursor-not-allowed",
-                )}
-              >
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Camera Scanner
-                </span>
-                <div
-                  className={cn(
-                    "relative h-5 w-9 rounded-full transition-colors",
-                    cameraRunning
-                      ? "bg-blue-600"
-                      : "bg-slate-300 dark:bg-slate-600",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "absolute top-[2px] left-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
-                      cameraRunning && "translate-x-4",
-                    )}
-                  ></div>
-                </div>
-                <input
-                  type="checkbox"
-                  className="sr-only"
-                  checked={cameraRunning}
-                  onChange={toggleCamera}
-                  disabled={!sessionId}
-                />
-              </label>
-
-              <button
-                className={cn(
-                  "h-10 w-[130px] flex items-center justify-center px-4 rounded-md font-medium text-sm shadow-sm transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed",
-                  sessionId
-                    ? "bg-red-600 text-white hover:bg-red-700"
-                    : "bg-green-600 text-white hover:bg-green-700",
-                )}
-                onClick={sessionId ? handleFinalizeSession : handleStartSession}
-                disabled={
-                  sessionBusy.starting ||
-                  sessionBusy.finalizing ||
-                  (!sessionId && !courseId)
-                }
-              >
-                {sessionBusy.starting
-                  ? "Starting..."
-                  : sessionBusy.finalizing
-                    ? "Ending..."
-                    : sessionId
-                      ? "End Session"
-                      : "Start Session"}
-              </button>
-            </div>
-          </div>
-        </div>
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      professor={professor}
+      onLogout={handleLogout}
+      headerAction={
+        <button
+          className={`h-8 px-4 rounded-sm font-medium text-xs transition-all duration-300 ease-in-out disabled:opacity-40 disabled:cursor-not-allowed ${
+            sessionId
+              ? "bg-bg text-fg border border-fg hover:bg-fg hover:text-bg"
+              : "bg-fg text-bg hover:opacity-80"
+          }`}
+          onClick={sessionId ? handleFinalizeSession : handleStartSession}
+          disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
+        >
+          {sessionBusy.starting ? "Starting…" : sessionBusy.finalizing ? "Ending…" : sessionId ? "End Session" : "Start Session"}
+        </button>
       }
     >
-      <div className="mb-2">
+      {activeTab === 'dashboard' ? (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="mb-2">
         <StatCards
           stats={[
             {
@@ -634,9 +572,9 @@ export default function App() {
               variant: "warning",
             },
             {
-              label: "Needs Review",
-              value: atRiskCount,
-              hint: "Missing or low scores",
+              label: "Absent",
+              value: absentCount,
+              hint: sessionId ? "Not yet present" : "No active session",
               variant: "danger",
             },
           ]}
@@ -651,6 +589,8 @@ export default function App() {
             frameCanvasRef={frameCanvasRef}
             overlayCanvasRef={overlayCanvasRef}
             streamMetrics={streamMetrics}
+            toggleCamera={toggleCamera}
+            sessionId={sessionId}
           />
         </div>
 
@@ -658,13 +598,22 @@ export default function App() {
           <AttendanceTable
             attendance={attendance}
             sessionId={sessionId}
+            sessionStartTime={sessionStartTime}
+            sessionEndTime={sessionEndTime}
             markManualAttendance={markManualAttendance}
             attendanceBusyByStudent={attendanceBusyByStudent}
           />
         </div>
       </div>
 
-      <div className="mt-2">
+      
+            
+          </div>
+        </div>
+        ) : (
+          <div className="animate-in fade-in duration-300">
+            <div className="mt-2">
+            
         <GradebookTable
           gradebook={gradebook}
           gradeEditor={gradeEditor}
@@ -682,14 +631,10 @@ export default function App() {
         />
       </div>
 
-      <video
-        ref={videoWorkerRef}
-        style={{ position: 'fixed', top: '-9999px', left: '-9999px', width: '640px', height: '360px', pointerEvents: 'none' }}
-        autoPlay
-        muted
-        playsInline
-      />
-      <canvas ref={captureCanvasRef} className="hidden" aria-hidden="true" />
-    </DashboardLayout>
+          </div>
+        )}
+      <video ref={videoWorkerRef} style={{ display: "none" }} playsInline />
+      <canvas ref={captureCanvasRef} style={{ display: "none" }} />
+        </DashboardLayout>
   );
 }

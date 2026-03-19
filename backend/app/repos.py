@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -7,6 +8,30 @@ from .database import execute, fetch_all, fetch_one, get_connection
 
 
 class Repository:
+    @staticmethod
+    def authenticate_professor(username: str, password: str) -> Optional[Dict[str, Any]]:
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        row = fetch_one(
+            """
+            SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID,
+                   c.CourseName, c.CourseCode
+            FROM dbo.Professors p
+            INNER JOIN dbo.Courses c ON c.CourseID = p.CourseID
+            WHERE p.Username = ? AND p.PasswordHash = ? AND p.IsActive = 1;
+            """,
+            (username, password_hash),
+        )
+        if not row:
+            return None
+        return {
+            "professor_id": row["ProfessorID"],
+            "username": row["Username"],
+            "full_name": row["FullName"],
+            "course_id": row["CourseID"],
+            "course_name": row["CourseName"],
+            "course_code": row["CourseCode"],
+        }
+
     @staticmethod
     def healthcheck() -> Dict[str, Any]:
         row = fetch_one("SELECT DB_NAME() AS DbName, SYSUTCDATETIME() AS UtcNow;")
@@ -130,30 +155,59 @@ class Repository:
 
     @staticmethod
     def update_student_grades(course_id: int, student_id: int, grades: Dict[str, Any]) -> Dict[str, Any]:
-        execute(
-            """
-            UPDATE dbo.Enrollments
-            SET
-                Quiz1 = ?,
-                Quiz2 = ?,
-                ProjectGrade = ?,
-                AssignmentGrade = ?,
-                MidtermGrade = ?,
-                FinalExamGrade = ?,
-                UpdatedAt = SYSUTCDATETIME()
-            WHERE CourseID = ? AND StudentID = ?;
-            """,
-            (
-                grades["quiz1"],
-                grades["quiz2"],
-                grades["project"],
-                grades["assignment"],
-                grades["midterm"],
-                grades["final_exam"],
-                course_id,
-                student_id,
-            ),
-        )
+        hours_absent = grades.get("hours_absent_total")
+        if hours_absent is not None:
+            execute(
+                """
+                UPDATE dbo.Enrollments
+                SET
+                    Quiz1 = ?,
+                    Quiz2 = ?,
+                    ProjectGrade = ?,
+                    AssignmentGrade = ?,
+                    MidtermGrade = ?,
+                    FinalExamGrade = ?,
+                    HoursAbsentTotal = ?,
+                    UpdatedAt = SYSUTCDATETIME()
+                WHERE CourseID = ? AND StudentID = ?;
+                """,
+                (
+                    grades["quiz1"],
+                    grades["quiz2"],
+                    grades["project"],
+                    grades["assignment"],
+                    grades["midterm"],
+                    grades["final_exam"],
+                    max(0.0, float(hours_absent)),
+                    course_id,
+                    student_id,
+                ),
+            )
+        else:
+            execute(
+                """
+                UPDATE dbo.Enrollments
+                SET
+                    Quiz1 = ?,
+                    Quiz2 = ?,
+                    ProjectGrade = ?,
+                    AssignmentGrade = ?,
+                    MidtermGrade = ?,
+                    FinalExamGrade = ?,
+                    UpdatedAt = SYSUTCDATETIME()
+                WHERE CourseID = ? AND StudentID = ?;
+                """,
+                (
+                    grades["quiz1"],
+                    grades["quiz2"],
+                    grades["project"],
+                    grades["assignment"],
+                    grades["midterm"],
+                    grades["final_exam"],
+                    course_id,
+                    student_id,
+                ),
+            )
 
         row = fetch_one(
             """

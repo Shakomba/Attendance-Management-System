@@ -1,136 +1,174 @@
-import { cn } from '../../lib/utils'
+import { Edit2, ShieldAlert, AlertTriangle, XCircle } from 'lucide-react'
 
 export function GradebookTable({
-    gradebook,
-    gradeEditor,
-    gradeBusyByStudent,
-    updateGradeDraftField,
-    startGradeEdit,
-    cancelGradeEdit,
-    saveGradeEdit
+  gradebook,
+  gradeEditor,
+  gradeBusyByStudent,
+  startGradeEdit,
+  cancelGradeEdit,
+  updateGradeDraftField,
+  saveGradeEdit,
 }) {
+  if (!gradebook?.length) {
     return (
-        <article className="standard-card flex flex-col min-h-[300px]">
-            <header className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                    <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">
-                        Student Gradebook
-                    </h2>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Manage course grades and track penalties</p>
-                </div>
-            </header>
+      <div className="standard-card p-10 flex flex-col items-center justify-center text-secondary border-dashed">
+        <ShieldAlert size={32} className="mb-4 opacity-50" />
+        <p>No Gradebook Data Available</p>
+      </div>
+    );
+  }
 
-            <div className="flex-1 overflow-auto scroll-slim">
-                <table className="w-full text-left text-sm whitespace-nowrap min-w-[1000px]">
-                    <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-                        <tr className="text-slate-500 dark:text-slate-400 font-medium text-xs">
-                            <th className="px-5 py-3 rounded-tl-lg">Student Name</th>
-                            <th className="px-3 py-3 text-center">Quiz 1</th>
-                            <th className="px-3 py-3 text-center">Quiz 2</th>
-                            <th className="px-3 py-3 text-center">Project</th>
-                            <th className="px-3 py-3 text-center">Assignment</th>
-                            <th className="px-3 py-3 text-center">Midterm</th>
-                            <th className="px-3 py-3 text-center">Final Exam</th>
-                            <th className="px-3 py-3 text-center border-l border-slate-200 dark:border-slate-800 pl-4">Absences (Hrs)</th>
-                            <th className="px-3 py-3 text-center border-l border-slate-200 dark:border-slate-800 font-semibold">Total Grade</th>
-                            <th className="px-5 py-3 border-l border-slate-200 dark:border-slate-800 rounded-tr-lg">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                        {gradebook.map((row) => {
-                            const isAtRisk = Boolean(row.AtRiskByPolicy)
-                            const isEditing = Number(gradeEditor?.studentId) === Number(row.StudentID)
-                            const isSaving = Boolean(gradeBusyByStudent[row.StudentID])
+  const columns = [
+    { key: "Quiz1", label: "Q1" },
+    { key: "Quiz2", label: "Q2" },
+    { key: "ProjectGrade", label: "PRJ" },
+    { key: "AssignmentGrade", label: "ASSN" },
+    { key: "MidtermGrade", label: "MID" },
+    { key: "FinalExamGrade", label: "FIN" },
+  ];
 
-                            const InputCell = ({ field, value }) => (
-                                <td className="px-2 py-3 text-center">
-                                    {isEditing ? (
-                                        <input
-                                            className="w-16 text-center standard-input rounded-md px-2 py-1.5 text-xs font-mono"
-                                            type="number"
-                                            step="0.01"
-                                            value={gradeEditor.values[field]}
-                                            onChange={(e) => updateGradeDraftField(field, e.target.value)}
-                                        />
-                                    ) : (
-                                        <span className="font-mono text-[13px]">{Number(value).toFixed(2)}</span>
-                                    )}
-                                </td>
-                            )
+  return (
+    <div className="standard-card">
+      <div className="px-6 py-4 border-b border-border bg-surface">
+        <h2 className="text-sm font-semibold tracking-tight uppercase text-primary">Master Gradebook</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm whitespace-nowrap">
+          <thead className="bg-bg border-b border-border text-xs uppercase text-secondary">
+            <tr>
+              <th className="px-6 py-3 font-medium sticky left-0 bg-bg z-10 border-r border-border min-w-[200px]">Student</th>
+              {columns.map((c) => (
+                <th key={c.key} className="px-4 py-3 font-medium text-right">{c.label}</th>
+              ))}
+              <th className="px-4 py-3 font-medium text-right text-black">Total</th>
+              <th className="px-4 py-3 font-medium text-right">Abs (hrs)</th>
+              <th className="px-4 py-3 font-medium text-right">Status</th>
+              <th className="px-6 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {gradebook.map((row) => {
+              const isEditing = gradeEditor?.studentId === row.StudentID;
+              const isSaving = gradeBusyByStudent[row.StudentID];
+              const isDropped = Number(row.HoursAbsentTotal) >= 5;
+              const isAtRisk = !isDropped && row.AtRiskByPolicy;
 
-                            return (
-                                <tr
-                                    key={`${row.StudentID}-${row.StudentCode}`}
-                                    className={cn(
-                                        "group transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                                        isAtRisk && !isEditing && "bg-rose-50/30 dark:bg-rose-900/10",
-                                        isEditing && "bg-slate-100/50 dark:bg-slate-800"
-                                    )}
-                                >
-                                    <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-200">
-                                        <div className="flex items-center gap-2">
-                                            {isAtRisk && (
-                                                <span className="w-2 h-2 rounded-full bg-rose-500" title="At Risk"></span>
-                                            )}
-                                            {row.FullName}
-                                        </div>
-                                    </td>
+              const rowBg = isDropped
+                ? 'bg-red-500/10 hover:bg-red-500/15'
+                : isAtRisk
+                  ? 'bg-amber-500/10 hover:bg-amber-500/15'
+                  : 'hover:bg-surface'
 
-                                    <InputCell field="quiz1" value={row.Quiz1} />
-                                    <InputCell field="quiz2" value={row.Quiz2} />
-                                    <InputCell field="project" value={row.ProjectGrade} />
-                                    <InputCell field="assignment" value={row.AssignmentGrade} />
-                                    <InputCell field="midterm" value={row.MidtermGrade} />
-                                    <InputCell field="final_exam" value={row.FinalExamGrade} />
+              // Sticky cell needs a fully opaque bg so scrolling cells don't bleed through.
+              // We layer the same tint over the solid page background using a CSS gradient.
+              const stickyStyle = isDropped
+                ? { background: 'linear-gradient(rgb(239 68 68/.1),rgb(239 68 68/.1)) var(--color-bg)' }
+                : isAtRisk
+                  ? { background: 'linear-gradient(rgb(245 158 11/.1),rgb(245 158 11/.1)) var(--color-bg)' }
+                  : { background: 'var(--color-bg)' }
 
-                                    <td className="px-3 py-3 text-center border-l border-slate-200 dark:border-slate-800 pl-4 font-mono text-[13px] text-slate-500 dark:text-slate-400">
-                                        {Number(row.HoursAbsentTotal).toFixed(2)}
-                                    </td>
-                                    <td className="px-3 py-3 text-center font-mono font-bold border-l border-slate-200 dark:border-slate-800 text-sm">
-                                        {Number(row.AdjustedTotal).toFixed(2)}
-                                    </td>
-                                    <td className="px-5 py-3 border-l border-slate-200 dark:border-slate-800">
-                                        {isEditing ? (
-                                            <div className="flex gap-2">
-                                                <button
-                                                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                                                    onClick={() => saveGradeEdit(row.StudentID)}
-                                                    disabled={isSaving}
-                                                >
-                                                    {isSaving ? 'Saving' : 'Save'}
-                                                </button>
-                                                <button
-                                                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                                                    onClick={cancelGradeEdit}
-                                                    disabled={isSaving}
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                className="px-3 py-1.5 text-xs font-medium rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 disabled:opacity-50 transition-colors"
-                                                onClick={() => startGradeEdit(row)}
-                                                disabled={Boolean(gradeEditor) && !isEditing}
-                                            >
-                                                Edit
-                                            </button>
-                                        )}
-                                    </td>
-                                </tr>
-                            )
-                        })}
+              return (
+                <tr key={row.StudentID} className={`transition-colors ${rowBg}`}>
+                  <td className="px-6 py-3 sticky left-0 z-10 border-r border-border font-medium" style={stickyStyle}>
+                    <div className="text-primary">{row.FullName}</div>
+                  </td>
 
-                        {!gradebook.length && (
-                            <tr>
-                                <td colSpan={10} className="px-5 py-16 text-center text-slate-500 dark:text-slate-400">
-                                    <span className="text-sm">No gradebook records available. Select a course to view grades.</span>
-                                </td>
-                            </tr>
+                  {columns.map((c) => {
+                    const editorField = c.key.replace("Grade", "").toLowerCase();
+                    const val = isEditing ? gradeEditor.values[editorField] : (row[c.key] ?? "-");
+
+                    return (
+                      <td key={c.key} className="px-4 py-3 text-right font-mono text-secondary">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="100"
+                            className="ui-input w-20 text-right font-mono"
+                            value={val}
+                            onChange={(e) => updateGradeDraftField(editorField, e.target.value)}
+                            disabled={isSaving}
+                          />
+                        ) : (
+                          val
                         )}
-                    </tbody>
-                </table>
-            </div>
-        </article>
-    )
+                      </td>
+                    );
+                  })}
+
+                  <td className="px-4 py-3 text-right font-mono font-bold text-primary">
+                    {row.TotalGrade ? Number(row.TotalGrade).toFixed(1) : "-"}
+                  </td>
+
+                  <td className={`px-4 py-3 text-right font-mono text-sm ${isDropped ? 'text-red-500 font-bold' : isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'}`}>
+                    {isEditing ? (
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        className="ui-input w-20 text-right font-mono"
+                        value={gradeEditor.values.hours_absent}
+                        onChange={(e) => updateGradeDraftField("hours_absent", e.target.value)}
+                        disabled={isSaving}
+                      />
+                    ) : (
+                      row.HoursAbsentTotal != null ? Number(row.HoursAbsentTotal).toFixed(1) : "-"
+                    )}
+                  </td>
+
+                  <td className="px-4 py-3 text-right">
+                    <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border w-20 ${
+                      isDropped
+                        ? 'border-red-500/40 bg-red-500/15 text-red-500'
+                        : isAtRisk
+                          ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
+                          : 'border-border bg-surface text-secondary'
+                    }`}>
+                      {isDropped ? (
+                        <><XCircle size={11} /> Dropped</>
+                      ) : isAtRisk ? (
+                        <><AlertTriangle size={11} /> At Risk</>
+                      ) : (
+                        'Good'
+                      )}
+                    </span>
+                  </td>
+
+                  <td className="px-6 py-3 text-right">
+                    {isEditing ? (
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => saveGradeEdit(row.StudentID)}
+                          disabled={isSaving}
+                          className="btn-primary"
+                        >
+                          {isSaving ? "..." : "Save"}
+                        </button>
+                        <button
+                          onClick={cancelGradeEdit}
+                          disabled={isSaving}
+                          className="btn-secondary"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startGradeEdit(row)}
+                        className="p-1.5 rounded-sm border border-border text-secondary hover:bg-black hover:text-white transition-all shadow-sm"
+                        title="Edit Grades"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }

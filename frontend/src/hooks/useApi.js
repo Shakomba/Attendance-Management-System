@@ -25,7 +25,7 @@ export function useApi() {
 
     const [health, setHealth] = useState(null)
     const [courses, setCourses] = useState([])
-    const [courseId, setCourseId] = useState('')
+    const [courseId, setCourseId] = useState('1')
     const [busy, setBusy] = useState({ loading: false })
 
     const apiFetch = useCallback(
@@ -52,7 +52,7 @@ export function useApi() {
             const allCourses = courseRes?.items || []
             setCourses(allCourses)
             setCourseId((prev) => {
-                if (!allCourses.length) return ''
+                if (!allCourses.length) return '1'
                 const hasPrev = allCourses.some((course) => String(course.CourseID) === String(prev))
                 return hasPrev ? prev : String(allCourses[0].CourseID)
             })

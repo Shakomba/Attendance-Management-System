@@ -46,6 +46,7 @@ class GradeUpdateRequest(BaseModel):
     assignment: float = Field(ge=0, le=100)
     midterm: float = Field(ge=0, le=100)
     final_exam: float = Field(ge=0, le=100)
+    hours_absent_total: Optional[float] = Field(default=None, ge=0)
 
 
 class ManualAttendanceUpdateRequest(BaseModel):
@@ -53,6 +54,20 @@ class ManualAttendanceUpdateRequest(BaseModel):
     is_late: bool = False
     arrival_delay_minutes: Optional[int] = Field(default=None, ge=0)
     marked_at: Optional[datetime] = None
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    professor_id: int
+    username: str
+    full_name: str
+    course_id: int
+    course_name: Optional[str] = None
+    course_code: Optional[str] = None
 
 
 class GenericMessage(BaseModel):

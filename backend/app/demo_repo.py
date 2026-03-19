@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
 class DemoRepository:
@@ -18,7 +23,7 @@ class DemoRepository:
                 "CourseName": "Distributed AI Systems",
                 "ScheduledStartTime": "09:00:00",
                 "LateGraceMinutes": 10,
-                "MaxAllowedAbsentHours": 8,
+                "MaxAllowedAbsentHours": 4,
                 "IsActive": 1,
             },
             2: {
@@ -27,7 +32,18 @@ class DemoRepository:
                 "CourseName": "Applied Machine Vision",
                 "ScheduledStartTime": "13:00:00",
                 "LateGraceMinutes": 10,
-                "MaxAllowedAbsentHours": 8,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+        }
+
+        self.professors: Dict[str, Dict[str, Any]] = {
+            "dr.ahmed": {
+                "ProfessorID": 1,
+                "Username": "dr.ahmed",
+                "PasswordHash": _hash_password("admin123"),
+                "FullName": "Dr. Ahmed Hassan",
+                "CourseID": 1,
                 "IsActive": 1,
             },
         }
@@ -175,7 +191,7 @@ class DemoRepository:
             + float(enrollment["MidtermGrade"])
             + float(enrollment["FinalExamGrade"])
         )
-        penalty = float(enrollment["HoursAbsentTotal"]) * 0.25
+        penalty = float(enrollment["HoursAbsentTotal"]) * 0.5
         adjusted = max(0.0, raw_total - penalty)
         at_risk_policy = adjusted < 60 or float(enrollment["HoursAbsentTotal"]) >= max_absent
         return {
@@ -184,6 +200,22 @@ class DemoRepository:
             "AdjustedTotal": round(adjusted, 2),
             "AtRisk": bool(at_risk_policy),
             "AtRiskByPolicy": bool(at_risk_policy),
+        }
+
+    def authenticate_professor(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        prof = self.professors.get(username)
+        if not prof or prof["IsActive"] != 1:
+            return None
+        if _hash_password(password) != prof["PasswordHash"]:
+            return None
+        course = self.courses.get(prof["CourseID"])
+        return {
+            "professor_id": prof["ProfessorID"],
+            "username": prof["Username"],
+            "full_name": prof["FullName"],
+            "course_id": prof["CourseID"],
+            "course_name": course["CourseName"] if course else None,
+            "course_code": course["CourseCode"] if course else None,
         }
 
     def healthcheck(self) -> Dict[str, Any]:
@@ -319,6 +351,8 @@ class DemoRepository:
         enrollment["AssignmentGrade"] = float(grades["assignment"])
         enrollment["MidtermGrade"] = float(grades["midterm"])
         enrollment["FinalExamGrade"] = float(grades["final_exam"])
+        if grades.get("hours_absent_total") is not None:
+            enrollment["HoursAbsentTotal"] = max(0.0, float(grades["hours_absent_total"]))
         enrollment["UpdatedAt"] = self._utcnow()
 
         for row in self.get_gradebook(course_id):
@@ -603,16 +637,38 @@ class DemoRepository:
                         "Source": "system",
                     }
 
+        course = self.courses.get(course_id)
+        grace_minutes = int(course.get("LateGraceMinutes", 10)) if course else 10
+
         for student_id in enrolled_ids:
-            absent_hours = 0
+            att = self.session_attendance.get((session_id, student_id))
+            first_seen = att.get("FirstSeenAt") if att else None
+
+            # Normalise to timezone-naive for consistent comparison with start_at
+            if first_seen is not None and getattr(first_seen, "tzinfo", None) is not None:
+                first_seen = first_seen.replace(tzinfo=None)
+
+            absent_weight = 0.0
             for hour_index in range(total_hours):
-                hour_key = (session_id, student_id, hour_index)
-                if self.session_hour_log[hour_key]["IsPresent"] == 0:
-                    absent_hours += 1
+                hour_start = start_at + timedelta(hours=hour_index)
+                grace_end = hour_start + timedelta(minutes=grace_minutes)
+
+                if first_seen is None:
+                    # Never arrived — full absent hour
+                    absent_weight += 1.0
+                elif first_seen <= hour_start:
+                    # Already present before this hour started (persistence fix)
+                    absent_weight += 0.0
+                elif first_seen <= grace_end:
+                    # Arrived within the grace window — Late = 0.5 h
+                    absent_weight += 0.5
+                else:
+                    # Arrived after grace period — Absent = 1.0 h
+                    absent_weight += 1.0
 
             enr = self.enrollments.get((student_id, course_id))
             if enr:
-                enr["HoursAbsentTotal"] = float(enr["HoursAbsentTotal"]) + float(absent_hours)
+                enr["HoursAbsentTotal"] = float(enr["HoursAbsentTotal"]) + absent_weight
                 enr["UpdatedAt"] = self._utcnow()
 
     def get_absentees_for_session(self, session_id: str) -> List[Dict[str, Any]]:
