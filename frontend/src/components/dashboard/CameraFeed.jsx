@@ -1,10 +1,10 @@
 import { Activity, VideoOff } from 'lucide-react'
 
-export function CameraFeed({ 
-  cameraRunning, 
-  viewportRef, 
-  frameCanvasRef, 
-  overlayCanvasRef, 
+export function CameraFeed({
+  cameraRunning,
+  viewportRef,
+  frameCanvasRef,
+  overlayCanvasRef,
   streamMetrics,
   toggleCamera,
   sessionId
@@ -29,34 +29,31 @@ export function CameraFeed({
             disabled={!sessionId}
           />
         </label>
-        
+
         {cameraRunning && (
           <div className="flex items-center gap-3">
             <span className="flex h-2 w-2 relative">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-40"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-black"></span>
             </span>
-            <span className="text-xs font-mono text-secondary">
-              {streamMetrics?.fps || 0} FPS · {streamMetrics?.latency || 0}ms
-            </span>
           </div>
         )}
       </div>
-      
+
       <div className="flex-1 bg-[#09090B] relative overflow-hidden">
         {!cameraRunning && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/30 z-10 font-mono text-sm gap-2">
-                <VideoOff size={32} />
-                <span>Stream Inactive</span>
-            </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white/30 z-10 font-mono text-sm gap-2">
+            <VideoOff size={32} />
+            <span>Stream Inactive</span>
+          </div>
         )}
         <div ref={viewportRef} className="absolute inset-0">
-          <canvas 
-            ref={frameCanvasRef} 
+          <canvas
+            ref={frameCanvasRef}
             className="absolute inset-0 w-full h-full"
           />
-          <canvas 
-            ref={overlayCanvasRef} 
+          <canvas
+            ref={overlayCanvasRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
           />
         </div>

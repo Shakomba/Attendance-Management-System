@@ -154,6 +154,21 @@ class Repository:
         )
 
     @staticmethod
+    def get_gradebook_for_students(course_id: int, student_ids: Sequence[int]) -> List[Dict[str, Any]]:
+        if not student_ids:
+            return []
+        placeholders = ",".join("?" for _ in student_ids)
+        return fetch_all(
+            f"""
+            SELECT *
+            FROM dbo.vw_Gradebook
+            WHERE CourseID = ? AND StudentID IN ({placeholders})
+            ORDER BY FullName;
+            """,
+            (course_id, *student_ids),
+        )
+
+    @staticmethod
     def update_student_grades(course_id: int, student_id: int, grades: Dict[str, Any]) -> Dict[str, Any]:
         hours_absent = grades.get("hours_absent_total")
         if hours_absent is not None:
@@ -547,6 +562,56 @@ class Repository:
         )
 
     @staticmethod
+    def get_absent_and_late_for_session(session_id: str) -> List[Dict[str, Any]]:
+        """Return absent + late students for session-end notification.
+
+        Each row includes:
+          SessionAbsentHours  – weight accrued in this session (1.0 absent, 0.5 late)
+          SessionPenalty      – grade points deducted this session
+          IsLate              – 1 if late, 0 if fully absent
+          HoursAbsentTotal    – cumulative total
+          AttendancePenalty   – cumulative penalty
+          AtRiskByPolicy      – 1 if now at-risk or dropped
+        """
+        return fetch_all(
+            """
+            SELECT
+                s.StudentID,
+                s.FullName,
+                s.Email,
+                g.CourseCode,
+                g.CourseName,
+                g.HoursAbsentTotal,
+                g.AttendancePenalty,
+                g.AtRiskByPolicy,
+                ISNULL(sa.IsLate, 0) AS IsLate,
+                CASE
+                    WHEN ISNULL(sa.IsPresent, 0) = 0 THEN 1.0
+                    WHEN ISNULL(sa.IsLate,    0) = 1 THEN 0.5
+                    ELSE 0.0
+                END AS SessionAbsentHours,
+                CASE
+                    WHEN ISNULL(sa.IsPresent, 0) = 0 THEN 0.5
+                    WHEN ISNULL(sa.IsLate,    0) = 1 THEN 0.25
+                    ELSE 0.0
+                END AS SessionPenalty
+            FROM dbo.ClassSessions cs
+            INNER JOIN dbo.vw_Gradebook g
+                ON g.CourseID = cs.CourseID
+            INNER JOIN dbo.Students s
+                ON s.StudentID = g.StudentID
+            LEFT JOIN dbo.SessionAttendance sa
+                ON sa.SessionID = cs.SessionID
+               AND sa.StudentID = s.StudentID
+            WHERE cs.SessionID = ?
+              AND (ISNULL(sa.IsPresent, 0) = 0 OR ISNULL(sa.IsLate, 0) = 1)
+            ORDER BY s.FullName;
+            """,
+            (session_id,),
+        )
+
+
+    @staticmethod
     def insert_email_log(
         session_id: str,
         student_id: int,
@@ -555,6 +620,7 @@ class Repository:
         status: str,
         error_message: Optional[str],
     ) -> None:
+
         execute(
             """
             INSERT INTO dbo.EmailDispatchLog

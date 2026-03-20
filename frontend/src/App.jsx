@@ -4,6 +4,7 @@ import { useApi, toWsBase } from "./hooks/useApi";
 import { useSession } from "./hooks/useSession";
 import { useCamera } from "./hooks/useCamera";
 import { useDashboardSocket } from "./hooks/useDashboardSocket";
+import { useEmail } from "./hooks/useEmail";
 
 import { LoginPage } from "./components/LoginPage";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
@@ -11,6 +12,7 @@ import { StatCards } from "./components/dashboard/StatCards";
 import { CameraFeed } from "./components/dashboard/CameraFeed";
 import { AttendanceTable } from "./components/dashboard/AttendanceTable";
 import { GradebookTable } from "./components/dashboard/GradebookTable";
+import { EmailPanel } from "./components/dashboard/EmailPanel";
 import { cn } from "./lib/utils";
 
 const DASH_DRAW_FPS = 30;
@@ -45,13 +47,21 @@ function gradeDraftFromRow(row) {
     project: Number(row.ProjectGrade ?? 0).toFixed(2),
     assignment: Number(row.AssignmentGrade ?? 0).toFixed(2),
     midterm: Number(row.MidtermGrade ?? 0).toFixed(2),
+    // Preserved but not shown in the edit UI — keeps the DB value intact on save
     final_exam: Number(row.FinalExamGrade ?? 0).toFixed(2),
     hours_absent: Number(row.HoursAbsentTotal ?? 0).toFixed(1),
   };
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, _setActiveTab] = useState(() => {
+    return localStorage.getItem("ams_active_tab") || 'dashboard';
+  });
+
+  const setActiveTab = useCallback((tab) => {
+    localStorage.setItem("ams_active_tab", tab);
+    _setActiveTab(tab);
+  }, []);
   const [theme, setTheme] = useState(() => {
     if (localStorage.getItem("ams_theme_manual") === "true") {
       const saved = localStorage.getItem("ams_theme");
@@ -111,6 +121,9 @@ export default function App() {
 
   const { overlayRef, connectDashboardSocket, closeDashboardSocket } =
     useDashboardSocket(toWsBase, apiBase);
+
+  const { sending: emailSending, lastResult: emailLastResult, sendBulkEmail, clearResult: clearEmailResult } =
+    useEmail(apiFetch);
 
   // Local State
   const [gradeEditor, setGradeEditor] = useState(null);
@@ -534,11 +547,10 @@ export default function App() {
       onLogout={handleLogout}
       headerAction={
         <button
-          className={`h-8 px-4 rounded-sm font-medium text-xs transition-all duration-300 ease-in-out disabled:opacity-40 disabled:cursor-not-allowed ${
-            sessionId
-              ? "bg-bg text-fg border border-fg hover:bg-fg hover:text-bg"
-              : "bg-fg text-bg hover:opacity-80"
-          }`}
+          className={`h-8 px-4 rounded-sm font-medium text-xs transition-all duration-300 ease-in-out disabled:opacity-40 disabled:cursor-not-allowed ${sessionId
+            ? "bg-bg text-fg border border-fg hover:bg-fg hover:text-bg"
+            : "bg-fg text-bg hover:opacity-80"
+            }`}
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
           disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
         >
@@ -548,93 +560,107 @@ export default function App() {
     >
       {activeTab === 'dashboard' ? (
         <div className="space-y-6 animate-in fade-in duration-300">
-          
+
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="mb-2">
-        <StatCards
-          stats={[
-            {
-              label: "Enrolled",
-              value: enrolledCount,
-              hint: "Total students registered",
-              variant: "default",
-            },
-            {
-              label: "Present",
-              value: presentCount,
-              hint: "Detected & checked-in",
-              variant: "primary",
-            },
-            {
-              label: "Late Arrival",
-              value: lateCount,
-              hint: "Checked in past cutoff",
-              variant: "warning",
-            },
-            {
-              label: "Absent",
-              value: absentCount,
-              hint: sessionId ? "Not yet present" : "No active session",
-              variant: "danger",
-            },
-          ]}
-        />
-      </div>
+              <StatCards
+                stats={[
+                  {
+                    label: "Enrolled",
+                    value: enrolledCount,
+                    hint: "Total students registered",
+                    variant: "default",
+                  },
+                  {
+                    label: "Present",
+                    value: presentCount,
+                    hint: "Detected & checked-in",
+                    variant: "primary",
+                  },
+                  {
+                    label: "Late Arrival",
+                    value: lateCount,
+                    hint: "Checked in past cutoff",
+                    variant: "warning",
+                  },
+                  {
+                    label: "Absent",
+                    value: absentCount,
+                    hint: sessionId ? "Not yet present" : "No active session",
+                    variant: "danger",
+                  },
+                ]}
+              />
+            </div>
 
-      <div className="grid gap-6 grid-cols-1 xl:grid-cols-12 min-h-[400px]">
-        <div className="xl:col-span-5 h-full">
-          <CameraFeed
-            cameraRunning={cameraRunning}
-            viewportRef={viewportRef}
-            frameCanvasRef={frameCanvasRef}
-            overlayCanvasRef={overlayCanvasRef}
-            streamMetrics={streamMetrics}
-            toggleCamera={toggleCamera}
-            sessionId={sessionId}
-          />
-        </div>
+            <div className="grid gap-6 grid-cols-1 xl:grid-cols-12 min-h-[400px]">
+              <div className="xl:col-span-5 h-full">
+                <CameraFeed
+                  cameraRunning={cameraRunning}
+                  viewportRef={viewportRef}
+                  frameCanvasRef={frameCanvasRef}
+                  overlayCanvasRef={overlayCanvasRef}
+                  streamMetrics={streamMetrics}
+                  toggleCamera={toggleCamera}
+                  sessionId={sessionId}
+                />
+              </div>
 
-        <div className="xl:col-span-7 h-full">
-          <AttendanceTable
-            attendance={attendance}
-            sessionId={sessionId}
-            sessionStartTime={sessionStartTime}
-            sessionEndTime={sessionEndTime}
-            markManualAttendance={markManualAttendance}
-            attendanceBusyByStudent={attendanceBusyByStudent}
-          />
-        </div>
-      </div>
+              <div className="xl:col-span-7 h-full">
+                <AttendanceTable
+                  attendance={attendance}
+                  sessionId={sessionId}
+                  sessionStartTime={sessionStartTime}
+                  sessionEndTime={sessionEndTime}
+                  markManualAttendance={markManualAttendance}
+                  attendanceBusyByStudent={attendanceBusyByStudent}
+                />
+              </div>
+            </div>
 
-      
-            
-          </div>
-        </div>
-        ) : (
-          <div className="animate-in fade-in duration-300">
-            <div className="mt-2">
-            
-        <GradebookTable
-          gradebook={gradebook}
-          gradeEditor={gradeEditor}
-          gradeBusyByStudent={gradeBusyByStudent}
-          startGradeEdit={(row) =>
-            setGradeEditor({
-              studentId: Number(row.StudentID),
-              fullName: row.FullName,
-              values: gradeDraftFromRow(row),
-            })
-          }
-          cancelGradeEdit={() => setGradeEditor(null)}
-          updateGradeDraftField={updateGradeDraftField}
-          saveGradeEdit={saveGradeEdit}
-        />
-      </div>
+
 
           </div>
-        )}
+        </div>
+      ) : activeTab === 'gradebook' ? (
+        <div className="animate-in fade-in duration-300">
+          <div className="mt-2">
+
+            <GradebookTable
+              gradebook={gradebook}
+              gradeEditor={gradeEditor}
+              gradeBusyByStudent={gradeBusyByStudent}
+              startGradeEdit={(row) =>
+                setGradeEditor({
+                  studentId: Number(row.StudentID),
+                  fullName: row.FullName,
+                  values: gradeDraftFromRow(row),
+                })
+              }
+              cancelGradeEdit={() => setGradeEditor(null)}
+              updateGradeDraftField={updateGradeDraftField}
+              saveGradeEdit={saveGradeEdit}
+            />
+          </div>
+
+        </div>
+      ) : activeTab === 'email' ? (
+        <div className="animate-in fade-in duration-300">
+          <div className="mt-2">
+            <EmailPanel
+              gradebook={gradebook}
+              courseId={courseId}
+              apiFetch={apiFetch}
+              sending={emailSending}
+              lastResult={emailLastResult}
+              sendBulkEmail={sendBulkEmail}
+              clearResult={clearEmailResult}
+            />
+          </div>
+        </div>
+      ) : null}
       <video ref={videoWorkerRef} style={{ display: "none" }} playsInline />
       <canvas ref={captureCanvasRef} style={{ display: "none" }} />
-        </DashboardLayout>
+    </DashboardLayout>
   );
 }

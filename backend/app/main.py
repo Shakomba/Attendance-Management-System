@@ -14,6 +14,8 @@ from .config import settings
 from .demo_repo import DemoRepository
 from .repos import Repository
 from .schemas import (
+    BulkEmailRequest,
+    BulkEmailResponse,
     FinalizeSessionResponse,
     GradeUpdateRequest,
     GenericMessage,
@@ -182,10 +184,32 @@ def update_session_attendance(
 
 
 @app.post("/api/sessions/{session_id}/finalize-send-emails", response_model=FinalizeSessionResponse)
-def finalize_and_email(session_id: str) -> FinalizeSessionResponse:
+async def finalize_and_email(session_id: str) -> FinalizeSessionResponse:
+    # Finalize the session in the DB immediately (fast)
     repo.finalize_session(session_id)
-    sent, failed = email_service.send_absentee_reports(session_id)
-    return FinalizeSessionResponse(session_id=session_id, emails_sent=sent, email_failures=failed)
+
+    # Send emails in the background — do NOT block the HTTP response on SMTP
+    async def _send():
+        await asyncio.to_thread(email_service.send_absentee_reports, session_id)
+
+    asyncio.create_task(_send())
+
+    return FinalizeSessionResponse(session_id=session_id, emails_sent=0, email_failures=0)
+
+
+@app.post("/api/courses/{course_id}/emails/send", response_model=BulkEmailResponse)
+def send_bulk_email(course_id: int, payload: BulkEmailRequest) -> BulkEmailResponse:
+    if payload.email_type not in ("grade_report", "absence_report"):
+        raise HTTPException(status_code=400, detail="email_type must be 'grade_report' or 'absence_report'.")
+    if not payload.student_ids:
+        raise HTTPException(status_code=400, detail="student_ids must not be empty.")
+
+    students = repo.get_gradebook_for_students(course_id, payload.student_ids)
+    if not students:
+        raise HTTPException(status_code=404, detail="No matching students found for this course.")
+
+    result = email_service.send_bulk_emails(students, payload.email_type)
+    return BulkEmailResponse(**result)
 
 
 def _parse_timestamp(value: Optional[str]) -> datetime:

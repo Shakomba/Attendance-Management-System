@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -73,3 +73,15 @@ class LoginResponse(BaseModel):
 class GenericMessage(BaseModel):
     message: str
     data: Optional[Dict] = None
+
+
+class BulkEmailRequest(BaseModel):
+    student_ids: List[int]
+    email_type: str  # "grade_report" or "absence_report"
+
+
+class BulkEmailResponse(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    results: List[Dict[str, Any]]

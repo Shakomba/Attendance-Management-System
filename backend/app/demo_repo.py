@@ -66,54 +66,42 @@ class DemoRepository:
         return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
     def _seed_demo_data(self) -> None:
-        self.create_student_and_enroll(
-            {
-                "student_code": "S001",
-                "full_name": "Amina Noor",
-                "email": "amina.noor@example.com",
-                "course_id": 1,
-                "grades": {
-                    "quiz1": 8.5,
-                    "quiz2": 9.0,
-                    "project": 18.0,
-                    "assignment": 17.5,
-                    "midterm": 16.0,
-                    "final_exam": 20.0,
-                },
+        new_students = [
+            ("S001", "Redeen Sirwan", "redeen.611224020@uor.edu.krd"),
+            ("S002", "Rebin Hussain", "rebin.611224019@uor.edu.krd"),
+            ("S003", "Drwd Samal", "drwd.611224013@uor.edu.krd"),
+            ("S004", "Arsh Khasraw", "arsh.611224002@uor.edu.krd"),
+            ("S005", "Abdulla Sleman", "abdulla.611224030@uor.edu.krd"),
+        ]
+
+        for code, name, email in new_students:
+            student_id = self._student_seq
+            self._student_seq += 1
+
+            self.students[student_id] = {
+                "StudentID": student_id,
+                "StudentCode": code,
+                "FullName": name,
+                "Email": email,
+                "ProfilePhotoUrl": None,
+                "IsActive": 1,
+                "CreatedAt": self._utcnow(),
             }
-        )
-        self.create_student_and_enroll(
-            {
-                "student_code": "S002",
-                "full_name": "Leo Carter",
-                "email": "leo.carter@example.com",
-                "course_id": 1,
-                "grades": {
-                    "quiz1": 7.0,
-                    "quiz2": 7.5,
-                    "project": 15.0,
-                    "assignment": 14.5,
-                    "midterm": 13.0,
-                    "final_exam": 16.0,
-                },
-            }
-        )
-        self.create_student_and_enroll(
-            {
-                "student_code": "S003",
-                "full_name": "Redeen Sirwan",
-                "email": "redeen.sirwan@example.com",
-                "course_id": 1,
-                "grades": {
-                    "quiz1": 9.0,
-                    "quiz2": 8.5,
-                    "project": 19.0,
-                    "assignment": 18.0,
-                    "midterm": 17.5,
-                    "final_exam": 19.0,
-                },
-            }
-        )
+
+            for course_id in [1, 2]:
+                modifier = int(code[-1])
+                self.enrollments[(student_id, course_id)] = {
+                    "StudentID": student_id,
+                    "CourseID": course_id,
+                    "Quiz1": max(3.0, 6.0 - modifier * 0.5),
+                    "Quiz2": max(3.0, 6.0 - modifier * 0.5),
+                    "ProjectGrade": max(6.0, 12.0 - modifier),
+                    "AssignmentGrade": max(3.0, 6.0 - modifier * 0.5),
+                    "MidtermGrade": max(10.0, 20.0 - modifier),
+                    "FinalExamGrade": max(25.0, 50.0 - modifier * 2.5),
+                    "HoursAbsentTotal": 0.0,
+                    "UpdatedAt": self._utcnow(),
+                }
 
     def _find_student_by_code(self, student_code: str) -> Optional[Dict[str, Any]]:
         target = student_code.strip().upper()
@@ -339,6 +327,11 @@ class DemoRepository:
 
         rows.sort(key=lambda row: row["FullName"])
         return rows
+
+    def get_gradebook_for_students(self, course_id: int, student_ids: list) -> List[Dict[str, Any]]:
+        all_rows = self.get_gradebook(course_id)
+        id_set = set(int(sid) for sid in student_ids)
+        return [r for r in all_rows if int(r["StudentID"]) in id_set]
 
     def update_student_grades(self, course_id: int, student_id: int, grades: Dict[str, Any]) -> Dict[str, Any]:
         enrollment = self.enrollments.get((student_id, course_id))
@@ -721,6 +714,64 @@ class DemoRepository:
         rows.sort(key=lambda row: row["FullName"])
         return rows
 
+    def get_absent_and_late_for_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return absent + late students with per-session hours for session-end emails."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return []
+
+        course_id = int(session["CourseID"])
+        course = self.courses.get(course_id)
+        if not course:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+
+        for (student_id, cid), enrollment in self.enrollments.items():
+            if cid != course_id:
+                continue
+
+            attendance = self.session_attendance.get((session_id, student_id))
+            is_present = attendance.get("IsPresent", 0) if attendance else 0
+            is_late = attendance.get("IsLate", 0) if attendance else 0
+
+            # Only include absent or late students
+            if is_present and not is_late:
+                continue
+
+            student = self.students.get(student_id)
+            if not student:
+                continue
+
+            metrics = self._compute_metrics(enrollment, int(course["MaxAllowedAbsentHours"]))
+
+            # Per-session weight: absent=1.0h, late=0.5h
+            if not is_present:
+                session_absent_hours = 1.0
+                session_penalty = 0.5
+            else:  # late
+                session_absent_hours = 0.5
+                session_penalty = 0.25
+
+            rows.append(
+                {
+                    "StudentID": student_id,
+                    "FullName": student["FullName"],
+                    "Email": student["Email"],
+                    "CourseCode": course["CourseCode"],
+                    "CourseName": course["CourseName"],
+                    "HoursAbsentTotal": enrollment["HoursAbsentTotal"],
+                    "AttendancePenalty": metrics["AttendancePenalty"],
+                    "AtRiskByPolicy": metrics["AtRiskByPolicy"],
+                    "IsLate": is_late,
+                    "SessionAbsentHours": session_absent_hours,
+                    "SessionPenalty": session_penalty,
+                }
+            )
+
+        rows.sort(key=lambda row: row["FullName"])
+        return rows
+
     def insert_email_log(
         self,
         session_id: str,
@@ -730,6 +781,7 @@ class DemoRepository:
         status: str,
         error_message: Optional[str],
     ) -> None:
+
         self.email_logs.append(
             {
                 "SessionID": session_id,

@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { LayoutDashboard, BookOpen, UserCheck, Sun, Moon, LogOut, User } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Mail, UserCheck, Sun, Moon, LogOut, User } from 'lucide-react'
 
 export function DashboardLayout({ children, activeTab, setActiveTab, theme, onToggleTheme, professor, onLogout, headerAction }) {
     return (
@@ -11,39 +11,52 @@ export function DashboardLayout({ children, activeTab, setActiveTab, theme, onTo
                     <UserCheck size={20} className="text-fg lg:hidden" />
                     <span className="font-mono font-bold text-lg hidden lg:block tracking-tight text-fg">Attendance</span>
                 </div>
-                
+
                 <nav className="flex flex-col gap-1 p-2 lg:p-4 mt-2 flex-1">
-                    <button 
-                        onClick={() => setActiveTab('dashboard')} 
+                    <button
+                        onClick={() => setActiveTab('dashboard')}
                         className={cn(
                             "flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full",
-                            activeTab === 'dashboard' 
-                                ? "bg-fg text-bg" 
+                            activeTab === 'dashboard'
+                                ? "bg-fg text-bg"
                                 : "text-secondary hover:bg-surface hover:text-fg"
                         )}
                         title="Live Monitor"
                     >
-                        <LayoutDashboard size={18} /> 
+                        <LayoutDashboard size={18} />
                         <span className="hidden lg:block text-sm">Live Monitor</span>
                     </button>
-                    <button 
-                        onClick={() => setActiveTab('gradebook')} 
+                    <button
+                        onClick={() => setActiveTab('gradebook')}
                         className={cn(
                             "flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full",
-                            activeTab === 'gradebook' 
-                                ? "bg-fg text-bg" 
+                            activeTab === 'gradebook'
+                                ? "bg-fg text-bg"
                                 : "text-secondary hover:bg-surface hover:text-fg"
                         )}
                         title="Gradebook"
                     >
-                        <BookOpen size={18} /> 
+                        <BookOpen size={18} />
                         <span className="hidden lg:block text-sm">Gradebook</span>
                     </button>
-                    
+                    <button
+                        onClick={() => setActiveTab('email')}
+                        className={cn(
+                            "flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full",
+                            activeTab === 'email'
+                                ? "bg-fg text-bg"
+                                : "text-secondary hover:bg-surface hover:text-fg"
+                        )}
+                        title="Email Students"
+                    >
+                        <Mail size={18} />
+                        <span className="hidden lg:block text-sm">Email</span>
+                    </button>
+
                     <div className="mt-auto pt-4 border-t border-border space-y-1">
-                        <button 
+                        <button
                             type="button"
-                            onClick={() => onToggleTheme?.()} 
+                            onClick={() => onToggleTheme?.()}
                             className="flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full text-secondary hover:bg-surface hover:text-fg"
                             title="Toggle Theme"
                         >
@@ -51,7 +64,7 @@ export function DashboardLayout({ children, activeTab, setActiveTab, theme, onTo
                             <span className="hidden lg:block text-sm">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
                         </button>
                         {onLogout && (
-                            <button 
+                            <button
                                 onClick={onLogout}
                                 className="flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full text-secondary hover:bg-surface hover:text-red-500"
                                 title="Sign Out"
