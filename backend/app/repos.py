@@ -318,9 +318,7 @@ class Repository:
                 s.FullName,
                 sa.FirstSeenAt,
                 sa.LastSeenAt,
-                sa.IsPresent,
-                sa.IsLate,
-                sa.ArrivalDelayMinutes
+                sa.IsPresent
             FROM dbo.ClassSessions cs
             INNER JOIN dbo.Enrollments e
                 ON e.CourseID = cs.CourseID
@@ -340,8 +338,6 @@ class Repository:
         session_id: str,
         student_id: int,
         is_present: bool,
-        is_late: bool,
-        arrival_delay_minutes: Optional[int],
         marked_at: Optional[datetime],
     ) -> Dict[str, Any]:
         session = Repository.get_session(session_id)
@@ -365,11 +361,6 @@ class Repository:
             raise ValueError("Session start time is invalid.")
 
         now_value = marked_at or datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-        delay_minutes = (
-            max(int((now_value - started_at).total_seconds() // 60), 0)
-            if arrival_delay_minutes is None
-            else max(int(arrival_delay_minutes), 0)
-        )
 
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -393,55 +384,17 @@ class Repository:
                                 ELSE target.LastSeenAt
                             END,
                             IsPresent = 1,
-                            IsLate = ?,
-                            ArrivalDelayMinutes = ?
+                            IsLate = 0,
+                            ArrivalDelayMinutes = NULL
                     WHEN NOT MATCHED THEN
                         INSERT (SessionID, StudentID, FirstSeenAt, LastSeenAt, IsPresent, IsLate, ArrivalDelayMinutes)
-                        VALUES (?, ?, ?, ?, 1, ?, ?);
+                        VALUES (?, ?, ?, ?, 1, 0, NULL);
                     """,
                     (
-                        session_id,
-                        student_id,
-                        now_value,
-                        now_value,
-                        now_value,
-                        now_value,
-                        now_value,
-                        now_value,
-                        1 if is_late else 0,
-                        delay_minutes,
-                        session_id,
-                        student_id,
-                        now_value,
-                        now_value,
-                        1 if is_late else 0,
-                        delay_minutes,
-                    ),
-                )
-
-                hour_index = delay_minutes // 60
-                hour_start = started_at + timedelta(hours=hour_index)
-                cursor.execute(
-                    """
-                    MERGE dbo.SessionHourLog AS target
-                    USING (SELECT ? AS SessionID, ? AS StudentID, ? AS HourIndex) AS src
-                    ON target.SessionID = src.SessionID
-                       AND target.StudentID = src.StudentID
-                       AND target.HourIndex = src.HourIndex
-                    WHEN MATCHED THEN
-                        UPDATE SET IsPresent = 1, Source = N'manual'
-                    WHEN NOT MATCHED THEN
-                        INSERT (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
-                        VALUES (?, ?, ?, ?, 1, N'manual');
-                    """,
-                    (
-                        session_id,
-                        student_id,
-                        hour_index,
-                        session_id,
-                        student_id,
-                        hour_index,
-                        hour_start,
+                        session_id, student_id,
+                        now_value, now_value, now_value,
+                        now_value, now_value, now_value,
+                        session_id, student_id, now_value, now_value,
                     ),
                 )
             else:
@@ -464,22 +417,6 @@ class Repository:
                     (session_id, student_id, session_id, student_id),
                 )
 
-                cursor.execute(
-                    """
-                    MERGE dbo.SessionHourLog AS target
-                    USING (SELECT ? AS SessionID, ? AS StudentID, 0 AS HourIndex) AS src
-                    ON target.SessionID = src.SessionID
-                       AND target.StudentID = src.StudentID
-                       AND target.HourIndex = src.HourIndex
-                    WHEN MATCHED THEN
-                        UPDATE SET IsPresent = 0, Source = N'manual'
-                    WHEN NOT MATCHED THEN
-                        INSERT (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
-                        VALUES (?, ?, 0, ?, 0, N'manual');
-                    """,
-                    (session_id, student_id, session_id, student_id, started_at),
-                )
-
             conn.commit()
 
         row = fetch_one(
@@ -490,9 +427,7 @@ class Repository:
                 s.FullName,
                 sa.FirstSeenAt,
                 sa.LastSeenAt,
-                sa.IsPresent,
-                sa.IsLate,
-                sa.ArrivalDelayMinutes
+                sa.IsPresent
             FROM dbo.SessionAttendance sa
             INNER JOIN dbo.Students s
                 ON s.StudentID = sa.StudentID
@@ -511,8 +446,6 @@ class Repository:
             """
             SELECT TOP 1
                 IsPresent,
-                IsLate,
-                ArrivalDelayMinutes,
                 FirstSeenAt,
                 LastSeenAt
             FROM dbo.SessionAttendance

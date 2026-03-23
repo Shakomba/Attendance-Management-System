@@ -51,8 +51,6 @@ class GradeUpdateRequest(BaseModel):
 
 class ManualAttendanceUpdateRequest(BaseModel):
     is_present: bool
-    is_late: bool = False
-    arrival_delay_minutes: Optional[int] = Field(default=None, ge=0)
     marked_at: Optional[datetime] = None
 
 

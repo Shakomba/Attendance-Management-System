@@ -104,8 +104,8 @@ services:
       SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
       SQL_TRUST_SERVER_CERT: "yes"
 
-      # Set AI_MODE=cpu if you want CPU-only operation.
-      AI_MODE: ${AI_MODE:-gpu}
+      # Set AI_MODE=gpu if you have a CUDA-capable GPU.
+      AI_MODE: ${AI_MODE:-cpu}
       CPU_FACE_DETECT_MODEL: ${CPU_FACE_DETECT_MODEL:-hog}
       CPU_DISTANCE_THRESHOLD: ${CPU_DISTANCE_THRESHOLD:-0.45}
       GPU_COSINE_THRESHOLD: ${GPU_COSINE_THRESHOLD:-0.55}
@@ -120,11 +120,12 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       SMTP_DRY_RUN: ${SMTP_DRY_RUN:-true}
 
-      NVIDIA_VISIBLE_DEVICES: "all"
-      NVIDIA_DRIVER_CAPABILITIES: "compute,utility,video"
-    gpus: all
+      # NVIDIA_VISIBLE_DEVICES: "all"
+      # NVIDIA_DRIVER_CAPABILITIES: "compute,utility,video"
+    # gpus: all   # disabled — no GPU on this machine
     volumes:
       - ./student_photos:/app/student_photos
+      - ./demo_data:/app/demo_data
     ports:
       - "${API_PORT_HOST:-8000}:8000"
     healthcheck:

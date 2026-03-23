@@ -17,8 +17,7 @@ class RecognitionEvent:
     student_id: Optional[int]
     full_name: str
     confidence: Optional[float]
-    is_late: bool
-    arrival_delay_minutes: Optional[int]
+    is_present: bool
     recognized_at: str
     engine_mode: str
 
@@ -149,8 +148,7 @@ class RecognitionService:
                         student_id=None,
                         full_name="Unknown Face",
                         confidence=None,
-                        is_late=False,
-                        arrival_delay_minutes=None,
+                        is_present=False,
                         recognized_at=event_time.isoformat(),
                         engine_mode=self.face_engine.mode,
                     )
@@ -192,14 +190,19 @@ class RecognitionService:
 
             attendance = self.repository.get_attendance_row(session_id, match.student_id) or {}
             self._last_event_by_student[cooldown_key] = event_time
+
+            # Don't send a presence notification for manually-overridden students —
+            # the overlay box still shows (added above), but the attendance table stays as set.
+            if attendance.get("_ManualLock"):
+                continue
+
             output.notifications.append(
                 RecognitionEvent(
                     event_type="recognized",
                     student_id=match.student_id,
                     full_name=match.full_name,
                     confidence=match.score,
-                    is_late=bool(attendance.get("IsLate", False)),
-                    arrival_delay_minutes=attendance.get("ArrivalDelayMinutes"),
+                    is_present=bool(attendance.get("IsPresent", True)),
                     recognized_at=event_time.isoformat(),
                     engine_mode=self.face_engine.mode,
                 )

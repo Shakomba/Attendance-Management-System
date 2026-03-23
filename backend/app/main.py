@@ -173,8 +173,6 @@ def update_session_attendance(
             session_id=session_id,
             student_id=student_id,
             is_present=payload.is_present,
-            is_late=payload.is_late if payload.is_present else False,
-            arrival_delay_minutes=payload.arrival_delay_minutes,
             marked_at=marked_at,
         )
     except ValueError as exc:
@@ -195,6 +193,12 @@ async def finalize_and_email(session_id: str) -> FinalizeSessionResponse:
     asyncio.create_task(_send())
 
     return FinalizeSessionResponse(session_id=session_id, emails_sent=0, email_failures=0)
+
+
+@app.get("/api/courses/{course_id}/sessions/history")
+def get_sessions_history(course_id: int) -> dict:
+    sessions = repo.list_sessions_with_summary(course_id)
+    return {"sessions": sessions}
 
 
 @app.post("/api/courses/{course_id}/emails/send", response_model=BulkEmailResponse)
@@ -314,8 +318,7 @@ async def _run_recognition(sid: str) -> None:
                             "event_type": recognition_event.event_type,
                             "full_name": recognition_event.full_name,
                             "confidence": recognition_event.confidence,
-                            "is_late": recognition_event.is_late,
-                            "arrival_delay_minutes": recognition_event.arrival_delay_minutes,
+                            "is_present": recognition_event.is_present,
                             "recognized_at": recognition_event.recognized_at,
                             "engine_mode": recognition_event.engine_mode,
                         },

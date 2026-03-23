@@ -39,7 +39,7 @@ export function useCamera(toWsBase, apiBase) {
 
     const startCamera = useCallback(async (activeSessionId, appendEvent) => {
         if (!activeSessionId) {
-            appendEvent?.('warning', 'Start a session before enabling camera stream')
+            appendEvent?.('warning', 'Start a lecture before enabling camera stream')
             return
         }
         if (cameraActiveRef.current) {

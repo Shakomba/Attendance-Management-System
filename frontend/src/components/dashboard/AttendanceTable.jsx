@@ -1,13 +1,38 @@
-import { Check, X, HelpCircle, Loader2, Clock } from 'lucide-react'
+import { Check, X, HelpCircle, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
 
 export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessionEndTime, markManualAttendance, attendanceBusyByStudent }) {
   const sessionEnded = !sessionId && !!sessionEndTime
+
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    setElapsed(0)
+    if (sessionStartTime && !sessionEnded) {
+      const update = () => {
+        setElapsed(Math.max(0, Math.floor((Date.now() - sessionStartTime.getTime()) / 1000)))
+      }
+      update()
+      const interval = setInterval(update, 1000)
+      return () => clearInterval(interval)
+    }
+  }, [sessionStartTime, sessionEnded])
+
+  const formatElapsed = (seconds) => {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = seconds % 60
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    }
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
 
   if (!sessionId && !sessionEndTime) {
     return (
       <div className="standard-card flex flex-col items-center justify-center h-full min-h-[300px] text-secondary">
         <HelpCircle size={48} className="mb-4 opacity-20" />
-        <p>No active session found</p>
+        <p>No active lecture found</p>
       </div>
     )
   }
@@ -17,7 +42,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
       <div className="px-6 py-4 border-b border-border bg-surface">
         <div className="flex items-center gap-2 text-xs font-mono text-secondary">
           {sessionStartTime && (
-            <span>Started <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span></span>
+            <span>Started <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span> {!sessionEnded && `(${formatElapsed(elapsed)})`}</span>
           )}
           {sessionEnded && sessionEndTime && (
             <>
@@ -47,7 +72,6 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
               {attendance.map((row) => {
                 const busy = !sessionEnded && attendanceBusyByStudent[row.StudentID]
                 const present = row.IsPresent
-                const late = present && row.IsLate
 
                 return (
                   <tr key={row.StudentID} className="hover:bg-surface transition-colors">
@@ -60,11 +84,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     </td>
 
                     <td className="px-6 py-4 hidden sm:table-cell">
-                      {late ? (
-                        <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-amber-500/40 bg-amber-500/10 text-amber-500 w-24">
-                          <Clock size={12} /> Late
-                        </span>
-                      ) : present ? (
+                      {present ? (
                         <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-border bg-black text-white w-24">
                           <Check size={12} /> Present
                         </span>
@@ -86,7 +106,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                         ) : (
                           <div className="flex justify-end gap-2">
                             <button
-                              disabled={present}
+                              disabled={!!present}
                               onClick={() => markManualAttendance(row.StudentID, row.FullName, "present")}
                               className="p-1.5 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg disabled:opacity-30 disabled:hover:bg-transparent transition-all"
                               title="Mark Present"

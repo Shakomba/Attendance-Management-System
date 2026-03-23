@@ -34,7 +34,7 @@ export function useDashboardSocket(toWsBase, apiBase) {
             gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.13)
             osc.connect(gain)
             gain.connect(ctx.destination)
-            osc.start()
+            osc.start(ctx.currentTime)
             osc.stop(ctx.currentTime + 0.14)
         } catch {
             // Ignore audio initialization issues.
@@ -65,7 +65,7 @@ export function useDashboardSocket(toWsBase, apiBase) {
 
             ws.onopen = () => {
                 setDashboardWsState('connected')
-                appendEvent?.('info', `Dashboard socket attached to session ${activeSessionId}`)
+                appendEvent?.('info', `Dashboard socket attached to lecture ${activeSessionId}`)
                 dashboardPingRef.current = setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) ws.send('ping')
                 }, 15000)
@@ -100,9 +100,8 @@ export function useDashboardSocket(toWsBase, apiBase) {
                         return
                     }
                     const confText = p.confidence === null || p.confidence === undefined ? '-' : Number(p.confidence).toFixed(3)
-                    const lateTag = p.is_late ? ' (Late)' : ''
-                    appendEvent?.('success', `${p.full_name} recognized | confidence ${confText}${lateTag}`)
-                    playBeep()
+                    appendEvent?.('success', `${p.full_name} recognized | confidence ${confText}`)
+                    if (p.is_present !== false) playBeep()
                     applyPresenceToAttendance?.(p)
                     refreshAttendance?.(activeSessionId)
                     return

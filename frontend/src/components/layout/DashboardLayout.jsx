@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { LayoutDashboard, BookOpen, Mail, UserCheck, Sun, Moon, LogOut, User } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Mail, UserCheck, Sun, Moon, LogOut, User, History } from 'lucide-react'
 
 export function DashboardLayout({ children, activeTab, setActiveTab, theme, onToggleTheme, professor, onLogout, headerAction }) {
     return (
@@ -51,6 +51,19 @@ export function DashboardLayout({ children, activeTab, setActiveTab, theme, onTo
                     >
                         <Mail size={18} />
                         <span className="hidden lg:block text-sm">Email</span>
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('history')}
+                        className={cn(
+                            "flex items-center justify-center lg:justify-start gap-3 p-3 lg:px-3 lg:py-2 rounded-sm font-medium transition-colors duration-200 w-full",
+                            activeTab === 'history'
+                                ? "bg-fg text-bg"
+                                : "text-secondary hover:bg-surface hover:text-fg"
+                        )}
+                        title="Lecture History"
+                    >
+                        <History size={18} />
+                        <span className="hidden lg:block text-sm">History</span>
                     </button>
 
                     <div className="mt-auto pt-4 border-t border-border space-y-1">

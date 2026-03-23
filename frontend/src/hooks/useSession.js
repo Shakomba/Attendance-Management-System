@@ -19,7 +19,7 @@ export function useSession(apiFetch, courseId) {
       setAttendance([]);
       return sid;
     } catch (err) {
-      console.error("Session start failed:", err.message);
+      console.error("Lecture start failed:", err.message);
       throw err;
     } finally {
       setBusy((prev) => ({ ...prev, starting: false }));
@@ -40,7 +40,7 @@ export function useSession(apiFetch, courseId) {
       setSessionId("");
       return result;
     } catch (err) {
-      console.error("Finalize session failed:", err.message);
+      console.error("Finalize lecture failed:", err.message);
       throw err;
     } finally {
       setBusy((prev) => ({ ...prev, finalizing: false }));

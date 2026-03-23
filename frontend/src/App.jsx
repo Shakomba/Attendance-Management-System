@@ -13,6 +13,7 @@ import { CameraFeed } from "./components/dashboard/CameraFeed";
 import { AttendanceTable } from "./components/dashboard/AttendanceTable";
 import { GradebookTable } from "./components/dashboard/GradebookTable";
 import { EmailPanel } from "./components/dashboard/EmailPanel";
+import { SessionHistory } from "./components/dashboard/SessionHistory";
 import { cn } from "./lib/utils";
 
 const DASH_DRAW_FPS = 30;
@@ -143,10 +144,15 @@ export default function App() {
   const frameCanvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
 
+  // Ref mirrors so drawOverlay can read current values without re-creating the callback
+  const attendanceRef = useRef([]);
+  useEffect(() => { attendanceRef.current = attendance; }, [attendance]);
+  const sessionStartTimeRef = useRef(null);
+  useEffect(() => { sessionStartTimeRef.current = sessionStartTime; }, [sessionStartTime]);
+
   // Derived Stats
   const enrolledCount = attendance ? attendance.length : gradebook.length;
   const presentCount = attendance.filter((r) => r.IsPresent).length;
-  const lateCount = attendance.filter((r) => r.IsPresent && r.IsLate).length;
   const absentCount = sessionId ? attendance.filter((r) => !r.IsPresent).length : 0;
 
   const renderRef = useRef({
@@ -265,8 +271,27 @@ export default function App() {
       const height = Math.max(1, bottom - top);
 
       const recognized = face.event_type === "recognized";
-      const strokeColor = recognized ? "#10b981" : "#f59e0b";
       const label = recognized ? `${face.full_name || "Student"}` : "Unknown";
+
+      let strokeColor;
+      if (!recognized) {
+        strokeColor = "#f59e0b"; // unknown face → amber
+      } else {
+        const row = attendanceRef.current.find(r => Number(r.StudentID) === Number(face.student_id));
+        if (row && row.IsPresent) {
+          strokeColor = "#10b981"; // present → green
+        } else {
+          if (row && row.ManualOverride) {
+            // Manually marked absent — always red
+            strokeColor = "#ef4444";
+          } else {
+            // Not yet arrived: yellow within the 10-min grace window, red after
+            const start = sessionStartTimeRef.current;
+            const sessionAgeMs = start ? Date.now() - start.getTime() : Infinity;
+            strokeColor = sessionAgeMs <= 10 * 60 * 1000 ? "#f59e0b" : "#ef4444";
+          }
+        }
+      }
 
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
@@ -353,10 +378,7 @@ export default function App() {
           if (Number(row.StudentID) !== studentId) return row;
           return {
             ...row,
-            IsPresent: 1,
-            IsLate: presencePayload?.is_late ? 1 : 0,
-            ArrivalDelayMinutes:
-              presencePayload?.arrival_delay_minutes ?? row.ArrivalDelayMinutes,
+            IsPresent: presencePayload?.is_present === false ? 0 : 1,
             FirstSeenAt: row.FirstSeenAt || eventAt,
             LastSeenAt: eventAt,
           };
@@ -427,7 +449,7 @@ export default function App() {
       });
       await Promise.all([refreshAttendance(sid), loadGradebook()]);
       await startCamera(sid, appendEvent);
-      appendEvent("success", `Session started at ${now.toLocaleTimeString()} for course ${courseId}`);
+      appendEvent("success", `Lecture started at ${now.toLocaleTimeString()} for course ${courseId}`);
     } catch (err) { }
   };
 
@@ -438,7 +460,7 @@ export default function App() {
       setSessionEndTime(endedAt);
       appendEvent(
         "success",
-        `Session ended at ${endedAt.toLocaleTimeString()}. Emails sent=${result?.emails_sent}, failed=${result?.email_failures}`,
+        `Lecture ended at ${endedAt.toLocaleTimeString()}. Emails sent=${result?.emails_sent}, failed=${result?.email_failures}`,
       );
       await Promise.all([loadGradebook(), refreshAttendance()]);
       stopCamera();
@@ -455,22 +477,11 @@ export default function App() {
     if (!sessionId)
       return appendEvent(
         "warning",
-        "Start a session before marking attendance",
+        "Start a lecture before marking attendance",
       );
-    // Auto-upgrade "present" to "late" if student is being marked more than 5 min after session start
-    const effectiveMode =
-      mode === "present" && sessionStartTime && Date.now() - sessionStartTime.getTime() > 5 * 60 * 1000
-        ? "late"
-        : mode;
-    const delayMinutes = sessionStartTime
-      ? Math.round((Date.now() - sessionStartTime.getTime()) / 60000)
-      : 0;
-    const payload =
-      effectiveMode === "absent"
-        ? { is_present: false, is_late: false }
-        : effectiveMode === "late"
-          ? { is_present: true, is_late: true, arrival_delay_minutes: delayMinutes }
-          : { is_present: true, is_late: false };
+    const payload = mode === "absent"
+      ? { is_present: false }
+      : { is_present: true };
     setAttendanceBusyByStudent((prev) => ({ ...prev, [studentId]: true }));
     try {
       await apiFetch(
@@ -478,7 +489,7 @@ export default function App() {
         { method: "PATCH", body: JSON.stringify(payload) },
       );
       await refreshAttendance();
-      appendEvent("success", `Attendance marked ${effectiveMode} for ${fullName}`);
+      appendEvent("success", `Attendance marked ${mode} for ${fullName}`);
     } catch (err) {
       appendEvent("error", `Manual attendance update failed: ${err.message}`);
     } finally {
@@ -554,7 +565,7 @@ export default function App() {
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
           disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
         >
-          {sessionBusy.starting ? "Starting…" : sessionBusy.finalizing ? "Ending…" : sessionId ? "End Session" : "Start Session"}
+          {sessionBusy.starting ? "Starting…" : sessionBusy.finalizing ? "Ending…" : sessionId ? "End Lecture" : "Start Lecture"}
         </button>
       }
     >
@@ -578,15 +589,9 @@ export default function App() {
                     variant: "primary",
                   },
                   {
-                    label: "Late Arrival",
-                    value: lateCount,
-                    hint: "Checked in past cutoff",
-                    variant: "warning",
-                  },
-                  {
                     label: "Absent",
                     value: absentCount,
-                    hint: sessionId ? "Not yet present" : "No active session",
+                    hint: sessionId ? "Not yet present" : "No active lecture",
                     variant: "danger",
                   },
                 ]}
@@ -656,6 +661,12 @@ export default function App() {
               sendBulkEmail={sendBulkEmail}
               clearResult={clearEmailResult}
             />
+          </div>
+        </div>
+      ) : activeTab === 'history' ? (
+        <div className="animate-in fade-in duration-300">
+          <div className="mt-2">
+            <SessionHistory apiFetch={apiFetch} courseId={courseId} />
           </div>
         </div>
       ) : null}

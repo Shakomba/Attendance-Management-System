@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+
+_DEFAULT_STATE_FILE = Path(__file__).resolve().parent.parent / "demo_data" / "state.json"
 
 
 def _hash_password(password: str) -> str:
@@ -58,12 +62,109 @@ class DemoRepository:
         self.session_hour_log: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
 
         self.email_logs: List[Dict[str, Any]] = []
+
+        _env = os.environ.get("DEMO_STATE_FILE", "")
+        self._state_file = Path(_env) if _env else _DEFAULT_STATE_FILE
+
         self._seed_demo_data()
+        self._load_state()
 
     @staticmethod
     def _utcnow() -> datetime:
         """Return the current UTC time as a naive datetime (consistent with DB expectations)."""
         return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+
+    # ------------------------------------------------------------------ #
+    #  Persistence helpers                                                 #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _enc(v: Any) -> Any:
+        """Encode a value for JSON storage."""
+        if isinstance(v, datetime):
+            return {"_dt": v.isoformat()}
+        return v
+
+    @staticmethod
+    def _dec(v: Any) -> Any:
+        """Decode a value read from JSON storage."""
+        if isinstance(v, dict) and list(v.keys()) == ["_dt"]:
+            return datetime.fromisoformat(v["_dt"])
+        if isinstance(v, dict):
+            return {k: DemoRepository._dec(val) for k, val in v.items()}
+        if isinstance(v, list):
+            return [DemoRepository._dec(item) for item in v]
+        return v
+
+    def _save_state(self) -> None:
+        """Write mutable in-memory state to disk (atomic rename)."""
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+
+            def enc_row(d: Dict[str, Any]) -> Dict[str, Any]:
+                return {k: self._enc(v) for k, v in d.items() if not isinstance(v, bytes)}
+
+            state = {
+                "_student_seq": self._student_seq,
+                "students": {str(k): enc_row(v) for k, v in self.students.items()},
+                "enrollments": {
+                    f"{k[0]}|{k[1]}": enc_row(v) for k, v in self.enrollments.items()
+                },
+                "sessions": {k: enc_row(v) for k, v in self.sessions.items()},
+                "session_attendance": {
+                    f"{k[0]}|{k[1]}": enc_row(v)
+                    for k, v in self.session_attendance.items()
+                },
+                "session_hour_log": {
+                    f"{k[0]}|{k[1]}|{k[2]}": enc_row(v)
+                    for k, v in self.session_hour_log.items()
+                },
+            }
+
+            tmp = self._state_file.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+            tmp.rename(self._state_file)
+        except Exception as exc:
+            print(f"[demo_repo] State save failed: {exc}")
+
+    def _load_state(self) -> None:
+        """Restore mutable state from disk if a state file exists."""
+        if not self._state_file.exists():
+            return
+        try:
+            with open(self._state_file, encoding="utf-8") as f:
+                state = json.load(f)
+
+            d = self._dec  # shorthand
+
+            if "_student_seq" in state:
+                self._student_seq = int(state["_student_seq"])
+
+            for str_id, student in state.get("students", {}).items():
+                self.students[int(str_id)] = d(student)
+
+            for key_str, enr in state.get("enrollments", {}).items():
+                sid_s, cid_s = key_str.split("|", 1)
+                self.enrollments[(int(sid_s), int(cid_s))] = d(enr)
+
+            for session_id, session in state.get("sessions", {}).items():
+                self.sessions[session_id] = d(session)
+
+            for key_str, att in state.get("session_attendance", {}).items():
+                sess_id, sid_s = key_str.split("|", 1)
+                self.session_attendance[(sess_id, int(sid_s))] = d(att)
+
+            for key_str, log in state.get("session_hour_log", {}).items():
+                parts = key_str.split("|", 2)
+                self.session_hour_log[(parts[0], int(parts[1]), int(parts[2]))] = d(log)
+
+            print(
+                f"[demo_repo] Loaded state: {len(self.sessions)} sessions, "
+                f"{len(self.session_attendance)} attendance records"
+            )
+        except Exception as exc:
+            print(f"[demo_repo] State load failed (starting fresh): {exc}")
 
     def _seed_demo_data(self) -> None:
         new_students = [
@@ -242,6 +343,7 @@ class DemoRepository:
             "UpdatedAt": self._utcnow(),
         }
 
+        self._save_state()
         return {"student_id": student_id, "course_id": course_id}
 
     def upsert_face_embedding(self, student_id: int, model_name: str, embedding_data: bytes) -> None:
@@ -258,6 +360,49 @@ class DemoRepository:
                 "CreatedAt": self._utcnow(),
             }
         )
+
+    def list_sessions_with_summary(self, course_id: int) -> List[Dict[str, Any]]:
+        """Return all sessions for a course with attendance summary and absentee list."""
+        course = self.courses.get(course_id, {})
+        course_name = course.get("CourseName", "")
+        enrolled_ids = [sid for (sid, cid) in self.enrollments.keys() if cid == course_id]
+        total_enrolled = len(enrolled_ids)
+
+        result = []
+        for session_id, session in self.sessions.items():
+            if int(session["CourseID"]) != course_id:
+                continue
+
+            present_count = 0
+            absentees = []
+
+            for student_id in enrolled_ids:
+                att = self.session_attendance.get((session_id, student_id), {})
+                if att.get("IsPresent"):
+                    present_count += 1
+                else:
+                    student = self.students.get(student_id, {})
+                    absentees.append({
+                        "student_id": student_id,
+                        "full_name": student.get("FullName", "Unknown"),
+                    })
+
+            started = session.get("StartedAt")
+            ended = session.get("EndedAt")
+            result.append({
+                "session_id": session_id,
+                "course_name": course_name,
+                "started_at": started.isoformat() if started else None,
+                "ended_at": ended.isoformat() if ended else None,
+                "status": session.get("Status", "unknown"),
+                "total_enrolled": total_enrolled,
+                "present_count": present_count,
+                "absent_count": total_enrolled - present_count,
+                "absentees": sorted(absentees, key=lambda x: x["full_name"]),
+            })
+
+        result.sort(key=lambda x: x["started_at"] or "", reverse=True)
+        return result
 
     def list_known_embeddings(self, course_id: int, model_name: str) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
@@ -348,6 +493,7 @@ class DemoRepository:
             enrollment["HoursAbsentTotal"] = max(0.0, float(grades["hours_absent_total"]))
         enrollment["UpdatedAt"] = self._utcnow()
 
+        self._save_state()
         for row in self.get_gradebook(course_id):
             if int(row["StudentID"]) == int(student_id):
                 return row
@@ -366,6 +512,7 @@ class DemoRepository:
             "Status": "active",
         }
 
+        self._save_state()
         return {
             "session_id": sid,
             "course_id": course_id,
@@ -413,13 +560,18 @@ class DemoRepository:
         if not course:
             return
 
+        key = (session_id, student_id)
+        existing = self.session_attendance.get(key)
+
+        # Respect manual overrides — don't let camera recognition overwrite them.
+        if existing and existing.get("_ManualLock"):
+            return
+
         delay = int((recognized_at - session["StartedAt"]).total_seconds() // 60)
         if delay < 0:
             delay = 0
-
         grace = int(course["LateGraceMinutes"])
-        key = (session_id, student_id)
-        existing = self.session_attendance.get(key)
+        within_grace = delay <= grace
 
         if not existing:
             self.session_attendance[key] = {
@@ -427,25 +579,24 @@ class DemoRepository:
                 "StudentID": student_id,
                 "FirstSeenAt": recognized_at,
                 "LastSeenAt": recognized_at,
-                "IsPresent": 1,
-                "IsLate": 1 if delay > grace else 0,
-                "ArrivalDelayMinutes": delay,
+                "IsPresent": 1 if within_grace else 0,
             }
+            if within_grace:
+                self._save_state()
         else:
-            existing["FirstSeenAt"] = min(existing["FirstSeenAt"], recognized_at)
-            existing["LastSeenAt"] = max(existing["LastSeenAt"], recognized_at)
-            existing["IsPresent"] = 1
-
-        hour_index = delay // 60
-        hour_key = (session_id, student_id, hour_index)
-        self.session_hour_log[hour_key] = {
-            "SessionID": session_id,
-            "StudentID": student_id,
-            "HourIndex": hour_index,
-            "HourStart": session["StartedAt"],
-            "IsPresent": 1,
-            "Source": "recognizer",
-        }
+            last = existing.get("LastSeenAt")
+            existing["LastSeenAt"] = recognized_at if last is None else max(last, recognized_at)
+            if existing.get("IsPresent"):
+                # Already present — just update timestamps, don't change status
+                if existing.get("FirstSeenAt") is None:
+                    existing["FirstSeenAt"] = recognized_at
+            elif within_grace:
+                # Still within grace window — mark present now
+                first = existing.get("FirstSeenAt")
+                existing["FirstSeenAt"] = recognized_at if first is None else min(first, recognized_at)
+                existing["IsPresent"] = 1
+                self._save_state()
+            # else: after grace, student stays absent
 
     def get_session_attendance(self, session_id: str) -> List[Dict[str, Any]]:
         session = self.sessions.get(session_id)
@@ -472,8 +623,7 @@ class DemoRepository:
                     "FirstSeenAt": attendance.get("FirstSeenAt"),
                     "LastSeenAt": attendance.get("LastSeenAt"),
                     "IsPresent": attendance.get("IsPresent", 0),
-                    "IsLate": attendance.get("IsLate", 0),
-                    "ArrivalDelayMinutes": attendance.get("ArrivalDelayMinutes"),
+                    "ManualOverride": bool(attendance.get("_ManualLock", False)),
                 }
             )
 
@@ -485,8 +635,6 @@ class DemoRepository:
         session_id: str,
         student_id: int,
         is_present: bool,
-        is_late: bool,
-        arrival_delay_minutes: Optional[int],
         marked_at: Optional[datetime],
     ) -> Dict[str, Any]:
         session = self.sessions.get(session_id)
@@ -497,15 +645,9 @@ class DemoRepository:
         if (student_id, course_id) not in self.enrollments:
             raise ValueError("Student is not enrolled in this session course.")
 
-        started_at = session["StartedAt"]
         now_value = marked_at or self._utcnow()
-        delay_minutes = (
-            max(int((now_value - started_at).total_seconds() // 60), 0)
-            if arrival_delay_minutes is None
-            else max(int(arrival_delay_minutes), 0)
-        )
-
         key = (session_id, student_id)
+
         if is_present:
             existing = self.session_attendance.get(key)
             if not existing:
@@ -515,8 +657,7 @@ class DemoRepository:
                     "FirstSeenAt": now_value,
                     "LastSeenAt": now_value,
                     "IsPresent": 1,
-                    "IsLate": 1 if is_late else 0,
-                    "ArrivalDelayMinutes": delay_minutes,
+                    "_ManualLock": True,
                 }
             else:
                 first_seen = existing.get("FirstSeenAt")
@@ -524,18 +665,7 @@ class DemoRepository:
                 existing["FirstSeenAt"] = now_value if first_seen is None else min(first_seen, now_value)
                 existing["LastSeenAt"] = now_value if last_seen is None else max(last_seen, now_value)
                 existing["IsPresent"] = 1
-                existing["IsLate"] = 1 if is_late else 0
-                existing["ArrivalDelayMinutes"] = delay_minutes
-
-            hour_index = delay_minutes // 60
-            self.session_hour_log[(session_id, student_id, hour_index)] = {
-                "SessionID": session_id,
-                "StudentID": student_id,
-                "HourIndex": hour_index,
-                "HourStart": started_at + timedelta(hours=hour_index),
-                "IsPresent": 1,
-                "Source": "manual",
-            }
+                existing["_ManualLock"] = True
         else:
             self.session_attendance[key] = {
                 "SessionID": session_id,
@@ -543,22 +673,14 @@ class DemoRepository:
                 "FirstSeenAt": None,
                 "LastSeenAt": None,
                 "IsPresent": 0,
-                "IsLate": 0,
-                "ArrivalDelayMinutes": None,
-            }
-            self.session_hour_log[(session_id, student_id, 0)] = {
-                "SessionID": session_id,
-                "StudentID": student_id,
-                "HourIndex": 0,
-                "HourStart": started_at,
-                "IsPresent": 0,
-                "Source": "manual",
+                "_ManualLock": True,
             }
 
         row = self.get_attendance_row(session_id, student_id)
         if not row:
             raise ValueError("Attendance row could not be updated.")
 
+        self._save_state()
         student = self.students.get(student_id, {})
         return {
             "StudentID": student_id,
@@ -567,8 +689,6 @@ class DemoRepository:
             "FirstSeenAt": row.get("FirstSeenAt"),
             "LastSeenAt": row.get("LastSeenAt"),
             "IsPresent": row.get("IsPresent", 0),
-            "IsLate": row.get("IsLate", 0),
-            "ArrivalDelayMinutes": row.get("ArrivalDelayMinutes"),
         }
 
     def get_attendance_row(self, session_id: str, student_id: int) -> Optional[Dict[str, Any]]:
@@ -577,10 +697,9 @@ class DemoRepository:
             return None
         return {
             "IsPresent": row.get("IsPresent", 0),
-            "IsLate": row.get("IsLate", 0),
-            "ArrivalDelayMinutes": row.get("ArrivalDelayMinutes"),
             "FirstSeenAt": row.get("FirstSeenAt"),
             "LastSeenAt": row.get("LastSeenAt"),
+            "_ManualLock": row.get("_ManualLock", False),
         }
 
     def finalize_session(self, session_id: str) -> None:
@@ -614,8 +733,6 @@ class DemoRepository:
                     "FirstSeenAt": None,
                     "LastSeenAt": None,
                     "IsPresent": 0,
-                    "IsLate": 0,
-                    "ArrivalDelayMinutes": None,
                 }
 
             for hour_index in range(total_hours):
@@ -646,23 +763,17 @@ class DemoRepository:
                 hour_start = start_at + timedelta(hours=hour_index)
                 grace_end = hour_start + timedelta(minutes=grace_minutes)
 
-                if first_seen is None:
-                    # Never arrived — full absent hour
+                if first_seen is None or first_seen > grace_end:
+                    # Never arrived or arrived after the grace window — absent for this hour
                     absent_weight += 1.0
-                elif first_seen <= hour_start:
-                    # Already present before this hour started (persistence fix)
-                    absent_weight += 0.0
-                elif first_seen <= grace_end:
-                    # Arrived within the grace window — Late = 0.5 h
-                    absent_weight += 0.5
-                else:
-                    # Arrived after grace period — Absent = 1.0 h
-                    absent_weight += 1.0
+                # else: arrived within grace window — present for this hour
 
             enr = self.enrollments.get((student_id, course_id))
             if enr:
                 enr["HoursAbsentTotal"] = float(enr["HoursAbsentTotal"]) + absent_weight
                 enr["UpdatedAt"] = self._utcnow()
+
+        self._save_state()
 
     def get_absentees_for_session(self, session_id: str) -> List[Dict[str, Any]]:
         session = self.sessions.get(session_id)
@@ -715,7 +826,7 @@ class DemoRepository:
         return rows
 
     def get_absent_and_late_for_session(self, session_id: str) -> List[Dict[str, Any]]:
-        """Return absent + late students with per-session hours for session-end emails."""
+        """Return absent students with per-session hours for session-end emails."""
         session = self.sessions.get(session_id)
         if not session:
             return []
@@ -733,10 +844,8 @@ class DemoRepository:
 
             attendance = self.session_attendance.get((session_id, student_id))
             is_present = attendance.get("IsPresent", 0) if attendance else 0
-            is_late = attendance.get("IsLate", 0) if attendance else 0
 
-            # Only include absent or late students
-            if is_present and not is_late:
+            if is_present:
                 continue
 
             student = self.students.get(student_id)
@@ -744,14 +853,6 @@ class DemoRepository:
                 continue
 
             metrics = self._compute_metrics(enrollment, int(course["MaxAllowedAbsentHours"]))
-
-            # Per-session weight: absent=1.0h, late=0.5h
-            if not is_present:
-                session_absent_hours = 1.0
-                session_penalty = 0.5
-            else:  # late
-                session_absent_hours = 0.5
-                session_penalty = 0.25
 
             rows.append(
                 {
@@ -763,9 +864,9 @@ class DemoRepository:
                     "HoursAbsentTotal": enrollment["HoursAbsentTotal"],
                     "AttendancePenalty": metrics["AttendancePenalty"],
                     "AtRiskByPolicy": metrics["AtRiskByPolicy"],
-                    "IsLate": is_late,
-                    "SessionAbsentHours": session_absent_hours,
-                    "SessionPenalty": session_penalty,
+                    "IsLate": 0,
+                    "SessionAbsentHours": 1.0,
+                    "SessionPenalty": 0.5,
                 }
             )
 
