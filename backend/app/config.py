@@ -51,5 +51,10 @@ class Settings:
     smtp_use_tls: bool = _as_bool(os.getenv("SMTP_USE_TLS", "true"), True)
     smtp_dry_run: bool = _as_bool(os.getenv("SMTP_DRY_RUN", "true"), True)
 
+    # JWT — set JWT_SECRET_KEY in .env before deploying to production
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_USE_A_LONG_RANDOM_SECRET")
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
+
 
 settings = Settings()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -20,6 +21,7 @@ class RecognitionEvent:
     is_present: bool
     recognized_at: str
     engine_mode: str
+    session_absent_hours: int = 0
 
 
 @dataclass
@@ -33,6 +35,7 @@ class FaceOverlay:
     right: int
     bottom: int
     engine_mode: str
+    session_absent_hours: int = 0
 
 
 @dataclass
@@ -49,6 +52,13 @@ class RecognitionService:
         self._embedding_cache: Dict[Tuple[int, str], Dict] = {}
         self._last_event_by_student: Dict[Tuple[str, int], datetime] = {}
         self._last_unknown_event_by_session: Dict[str, datetime] = {}
+
+    @staticmethod
+    def _session_absent_hours(session_start: datetime, event_time: datetime, grace_minutes: int) -> int:
+        elapsed_minutes = (event_time - session_start).total_seconds() / 60
+        if elapsed_minutes <= grace_minutes:
+            return 0
+        return math.ceil((elapsed_minutes - grace_minutes) / 60)
 
     @staticmethod
     def _to_utc_naive(value: datetime) -> datetime:
@@ -110,7 +120,17 @@ class RecognitionService:
             event_time = event_time.replace(tzinfo=timezone.utc)
         event_time_db = self._to_utc_naive(event_time)
 
+        session_start = session.get("StartedAt")
+        grace_minutes = 10
+        if session_start is not None and getattr(session_start, "tzinfo", None) is None:
+            session_start = session_start.replace(tzinfo=timezone.utc)
+
         for detection in detections:
+            absent_hours = (
+                self._session_absent_hours(session_start, event_time, grace_minutes)
+                if session_start is not None else 0
+            )
+
             match = self.face_engine.match_embedding(detection.embedding, known_faces) if known_faces else None
             if match is None:
                 output.overlays.append(
@@ -124,6 +144,7 @@ class RecognitionService:
                         right=detection.right,
                         bottom=detection.bottom,
                         engine_mode=self.face_engine.mode,
+                        session_absent_hours=0,
                     )
                 )
 
@@ -166,6 +187,7 @@ class RecognitionService:
                     right=detection.right,
                     bottom=detection.bottom,
                     engine_mode=self.face_engine.mode,
+                    session_absent_hours=absent_hours,
                 )
             )
 
@@ -202,9 +224,10 @@ class RecognitionService:
                     student_id=match.student_id,
                     full_name=match.full_name,
                     confidence=match.score,
-                    is_present=bool(attendance.get("IsPresent", True)),
+                    is_present=bool(attendance.get("IsPresent", False)),
                     recognized_at=event_time.isoformat(),
                     engine_mode=self.face_engine.mode,
+                    session_absent_hours=absent_hours,
                 )
             )
 

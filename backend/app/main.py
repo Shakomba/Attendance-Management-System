@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import base64
 import json
@@ -7,9 +5,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
+from .auth import create_access_token, decode_token, get_current_professor
 from .config import settings
 from .demo_repo import DemoRepository
 from .repos import Repository
@@ -31,7 +35,15 @@ from .services.face_engine import FaceEngine
 from .services.recognition_service import RecognitionService
 from .websocket_manager import WebSocketManager
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
 repo = DemoRepository() if settings.demo_mode else Repository()
 ws_manager = WebSocketManager()
 email_service = EmailService(repo)
@@ -45,6 +57,8 @@ try:
     recognition_service = RecognitionService(repo, face_engine)
 except Exception as exc:  # pragma: no cover
     face_engine_error = str(exc)
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -65,25 +79,76 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-allow_origins = list(settings.cors_origins) if settings.cors_origins else ["*"]
-if "*" in allow_origins:
-    allow_origins = ["*"]
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ---------------------------------------------------------------------------
+# Security headers middleware
+# ---------------------------------------------------------------------------
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# ---------------------------------------------------------------------------
+# CORS — explicit origins only; wildcard + credentials violates the spec
+# ---------------------------------------------------------------------------
+if settings.cors_origins:
+    allow_origins = list(settings.cors_origins)
+    allow_credentials = True
+else:
+    # Development fallback — no credentials required when no origin is pinned
+    allow_origins = ["http://localhost:5173", "http://localhost:3000"]
+    allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
+# ---------------------------------------------------------------------------
+# Authorization helpers
+# ---------------------------------------------------------------------------
+def _require_course(professor: dict, course_id: int) -> None:
+    if professor["course_id"] != course_id:
+        raise HTTPException(status_code=403, detail="Access denied to this course.")
 
+
+def _get_session_or_403(professor: dict, session_id: str):
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if int(session["CourseID"]) != professor["course_id"]:
+        raise HTTPException(status_code=403, detail="Access denied to this session.")
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 @app.post("/api/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest) -> LoginResponse:
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest) -> LoginResponse:
     result = repo.authenticate_professor(payload.username, payload.password)
     if not result:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
-    return LoginResponse(**result)
+    token = create_access_token(
+        professor_id=result["professor_id"],
+        username=result["username"],
+        course_id=result["course_id"],
+    )
+    return LoginResponse(**result, access_token=token)
 
 
 @app.get("/api/health")
@@ -100,22 +165,36 @@ def healthcheck() -> dict:
 
 
 @app.get("/api/courses")
-def list_courses() -> dict:
+def list_courses(professor: dict = Depends(get_current_professor)) -> dict:
     return {"items": repo.list_courses()}
 
 
 @app.post("/api/students", response_model=GenericMessage)
-def create_student(payload: StudentCreateRequest) -> GenericMessage:
+def create_student(
+    payload: StudentCreateRequest,
+    professor: dict = Depends(get_current_professor),
+) -> GenericMessage:
+    _require_course(professor, payload.course_id)
     result = repo.create_student_and_enroll(payload.model_dump())
     return GenericMessage(message="Student created and enrolled.", data=result)
 
 
 @app.post("/api/students/{student_id}/face", response_model=GenericMessage)
-async def upload_student_face(student_id: int, image: UploadFile = File(...)) -> GenericMessage:
+async def upload_student_face(
+    student_id: int,
+    image: UploadFile = File(...),
+    professor: dict = Depends(get_current_professor),
+) -> GenericMessage:
     if not face_engine:
         raise HTTPException(status_code=503, detail=face_engine_error or "Face engine not initialized.")
 
+    if image.content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are supported.")
+
     image_bytes = await image.read()
+    if len(image_bytes) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file too large (max 10 MB).")
+
     frame = face_engine.decode_image_bytes(image_bytes)
     if frame is None:
         raise HTTPException(status_code=400, detail="Could not decode image file.")
@@ -132,12 +211,22 @@ async def upload_student_face(student_id: int, image: UploadFile = File(...)) ->
 
 
 @app.get("/api/courses/{course_id}/gradebook")
-def get_gradebook(course_id: int) -> dict:
+def get_gradebook(
+    course_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _require_course(professor, course_id)
     return {"items": repo.get_gradebook(course_id)}
 
 
 @app.patch("/api/courses/{course_id}/students/{student_id}/grades", response_model=GenericMessage)
-def update_student_grades(course_id: int, student_id: int, payload: GradeUpdateRequest) -> GenericMessage:
+def update_student_grades(
+    course_id: int,
+    student_id: int,
+    payload: GradeUpdateRequest,
+    professor: dict = Depends(get_current_professor),
+) -> GenericMessage:
+    _require_course(professor, course_id)
     try:
         updated = repo.update_student_grades(course_id, student_id, payload.model_dump())
     except ValueError as exc:
@@ -146,7 +235,11 @@ def update_student_grades(course_id: int, student_id: int, payload: GradeUpdateR
 
 
 @app.post("/api/sessions/start", response_model=StartSessionResponse)
-def start_session(payload: StartSessionRequest) -> StartSessionResponse:
+def start_session(
+    payload: StartSessionRequest,
+    professor: dict = Depends(get_current_professor),
+) -> StartSessionResponse:
+    _require_course(professor, payload.course_id)
     started_at = payload.started_at
     if started_at and started_at.tzinfo:
         started_at = started_at.astimezone(timezone.utc).replace(tzinfo=None)
@@ -156,14 +249,22 @@ def start_session(payload: StartSessionRequest) -> StartSessionResponse:
 
 
 @app.get("/api/sessions/{session_id}/attendance")
-def get_session_attendance(session_id: str) -> dict:
+def get_session_attendance(
+    session_id: str,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _get_session_or_403(professor, session_id)
     return {"items": repo.get_session_attendance(session_id)}
 
 
 @app.patch("/api/sessions/{session_id}/students/{student_id}/attendance", response_model=GenericMessage)
 def update_session_attendance(
-    session_id: str, student_id: int, payload: ManualAttendanceUpdateRequest
+    session_id: str,
+    student_id: int,
+    payload: ManualAttendanceUpdateRequest,
+    professor: dict = Depends(get_current_professor),
 ) -> GenericMessage:
+    _get_session_or_403(professor, session_id)
     marked_at = payload.marked_at
     if marked_at and marked_at.tzinfo:
         marked_at = marked_at.astimezone(timezone.utc).replace(tzinfo=None)
@@ -182,27 +283,37 @@ def update_session_attendance(
 
 
 @app.post("/api/sessions/{session_id}/finalize-send-emails", response_model=FinalizeSessionResponse)
-async def finalize_and_email(session_id: str) -> FinalizeSessionResponse:
-    # Finalize the session in the DB immediately (fast)
+async def finalize_and_email(
+    session_id: str,
+    professor: dict = Depends(get_current_professor),
+) -> FinalizeSessionResponse:
+    _get_session_or_403(professor, session_id)
     repo.finalize_session(session_id)
 
-    # Send emails in the background — do NOT block the HTTP response on SMTP
     async def _send():
         await asyncio.to_thread(email_service.send_absentee_reports, session_id)
 
     asyncio.create_task(_send())
-
     return FinalizeSessionResponse(session_id=session_id, emails_sent=0, email_failures=0)
 
 
 @app.get("/api/courses/{course_id}/sessions/history")
-def get_sessions_history(course_id: int) -> dict:
+def get_sessions_history(
+    course_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _require_course(professor, course_id)
     sessions = repo.list_sessions_with_summary(course_id)
     return {"sessions": sessions}
 
 
 @app.post("/api/courses/{course_id}/emails/send", response_model=BulkEmailResponse)
-def send_bulk_email(course_id: int, payload: BulkEmailRequest) -> BulkEmailResponse:
+def send_bulk_email(
+    course_id: int,
+    payload: BulkEmailRequest,
+    professor: dict = Depends(get_current_professor),
+) -> BulkEmailResponse:
+    _require_course(professor, course_id)
     if payload.email_type not in ("grade_report", "absence_report"):
         raise HTTPException(status_code=400, detail="email_type must be 'grade_report' or 'absence_report'.")
     if not payload.student_ids:
@@ -216,6 +327,9 @@ def send_bulk_email(course_id: int, payload: BulkEmailRequest) -> BulkEmailRespo
     return BulkEmailResponse(**result)
 
 
+# ---------------------------------------------------------------------------
+# WebSocket helpers
+# ---------------------------------------------------------------------------
 def _parse_timestamp(value: Optional[str]) -> datetime:
     if not value:
         return datetime.now(timezone.utc)
@@ -239,8 +353,27 @@ def _decode_base64_frame(image_b64: str) -> Optional[bytes]:
         return None
 
 
+def _validate_ws_token(token: Optional[str]) -> Optional[dict]:
+    """Return decoded payload if valid, else None."""
+    if not token:
+        return None
+    return decode_token(token)
+
+
 @app.websocket("/ws/dashboard/{session_id}")
-async def dashboard_ws(websocket: WebSocket, session_id: str) -> None:
+async def dashboard_ws(
+    websocket: WebSocket,
+    session_id: str,
+    token: Optional[str] = Query(default=None),
+) -> None:
+    professor = _validate_ws_token(token)
+    if not professor:
+        await websocket.close(code=4001)
+        return
+    if int(professor.get("course_id", -1)) != _ws_session_course(session_id):
+        await websocket.close(code=4003)
+        return
+
     await ws_manager.connect_dashboard(session_id, websocket)
     await ws_manager.broadcast_dashboard(
         session_id,
@@ -253,10 +386,17 @@ async def dashboard_ws(websocket: WebSocket, session_id: str) -> None:
 
     try:
         while True:
-            # Keep-alive/read loop so the socket remains active.
             _ = await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect_dashboard(session_id, websocket)
+
+
+def _ws_session_course(session_id: str) -> int:
+    """Return the course_id for a session, or -1 if not found."""
+    session = repo.get_session(session_id)
+    if not session:
+        return -1
+    return int(session["CourseID"])
 
 
 _recognition_locks: dict = {}
@@ -301,6 +441,7 @@ async def _run_recognition(sid: str) -> None:
                                 "right": item.right,
                                 "bottom": item.bottom,
                                 "engine_mode": item.engine_mode,
+                                "session_absent_hours": item.session_absent_hours,
                             }
                             for item in frame_result.overlays
                         ],
@@ -321,6 +462,7 @@ async def _run_recognition(sid: str) -> None:
                             "is_present": recognition_event.is_present,
                             "recognized_at": recognition_event.recognized_at,
                             "engine_mode": recognition_event.engine_mode,
+                            "session_absent_hours": recognition_event.session_absent_hours,
                         },
                     },
                 )
@@ -334,7 +476,19 @@ async def _run_recognition(sid: str) -> None:
 
 
 @app.websocket("/ws/camera/{session_id}")
-async def camera_ws(websocket: WebSocket, session_id: str) -> None:
+async def camera_ws(
+    websocket: WebSocket,
+    session_id: str,
+    token: Optional[str] = Query(default=None),
+) -> None:
+    professor = _validate_ws_token(token)
+    if not professor:
+        await websocket.close(code=4001)
+        return
+    if int(professor.get("course_id", -1)) != _ws_session_course(session_id):
+        await websocket.close(code=4003)
+        return
+
     await ws_manager.connect_camera(session_id, websocket)
 
     frame_count = 0
@@ -346,7 +500,6 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
             if message.get("type") == "websocket.disconnect":
                 break
 
-            # Handle text messages (ping/pong only)
             if "text" in message and message["text"]:
                 try:
                     payload = json.loads(message["text"])
@@ -356,12 +509,9 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
                     pass
                 continue
 
-            # Handle binary messages (raw JPEG frames)
             raw_bytes = message.get("bytes")
             if not raw_bytes:
                 continue
-
-            # Frames are rendered locally in the browser — no relay needed
 
             if not recognition_service or not face_engine:
                 if frame_count % 120 == 0:
@@ -381,7 +531,6 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
 
             _latest_frames[session_id] = raw_bytes
 
-            # Skip scheduling if previous recognition is still running.
             if _recognition_locks.get(session_id, False):
                 continue
 
@@ -399,7 +548,6 @@ async def camera_ws(websocket: WebSocket, session_id: str) -> None:
                         },
                     )
 
-            # Fire recognition as background task — does NOT block frame relay.
             _recognition_locks[session_id] = True
             asyncio.create_task(_run_recognition(session_id))
 

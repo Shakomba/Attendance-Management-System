@@ -12,15 +12,10 @@ export function toWsBase(apiBase) {
 
 export function useApi() {
     const [apiBase, setApiBase] = useState(() => {
-        const envUrl = import.meta.env.VITE_API_BASE_URL;
-
-        // If we are accessing via local IP or localhost, dynamically point to port 8000
-        if (!window.location.hostname.includes('shakomba.org')) {
-            return `${window.location.protocol}//${window.location.hostname}:8000`;
-        }
-
-        // On production domain, use the compiled env URL or default fallback
-        return envUrl || 'https://api.shakomba.org';
+        const envUrl = import.meta.env.VITE_API_BASE_URL
+        if (envUrl) return envUrl
+        // Default: backend runs on port 8000 on the same host
+        return `${window.location.protocol}//${window.location.hostname}:8000`
     })
 
     const [health, setHealth] = useState(null)
@@ -30,9 +25,15 @@ export function useApi() {
 
     const apiFetch = useCallback(
         async (path, options = {}) => {
+            const token = localStorage.getItem('ams_token') || ''
+            const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {}
             const response = await fetch(`${normalizeApiBase(apiBase)}${path}`, {
-                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-                ...options
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...authHeader,
+                    ...(options.headers || {}),
+                },
+                ...options,
             })
             const text = await response.text()
             const data = text ? JSON.parse(text) : null

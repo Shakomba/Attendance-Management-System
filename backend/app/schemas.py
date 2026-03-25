@@ -66,6 +66,7 @@ class LoginResponse(BaseModel):
     course_id: int
     course_name: Optional[str] = None
     course_code: Optional[str] = None
+    access_token: str = ""
 
 
 class GenericMessage(BaseModel):
