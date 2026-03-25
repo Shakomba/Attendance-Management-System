@@ -14,9 +14,6 @@ import { AttendanceTable } from "./components/dashboard/AttendanceTable";
 import { GradebookTable } from "./components/dashboard/GradebookTable";
 import { EmailPanel } from "./components/dashboard/EmailPanel";
 import { SessionHistory } from "./components/dashboard/SessionHistory";
-import { cn } from "./lib/utils";
-
-const DASH_DRAW_FPS = 30;
 
 // Cover: scale to fill the target, cropping the overflow (no black bars)
 function coverRect(sourceW, sourceH, targetW, targetH) {
@@ -83,21 +80,22 @@ export default function App() {
   });
 
   const handleLogin = (data) => {
-    localStorage.setItem("ams_professor", JSON.stringify(data));
-    setProfessor(data);
+    const { access_token, ...profile } = data;
+    if (access_token) localStorage.setItem("ams_token", access_token);
+    localStorage.setItem("ams_professor", JSON.stringify(profile));
+    setProfessor(profile);
   };
 
   const handleLogout = () => {
     localStorage.removeItem("ams_professor");
+    localStorage.removeItem("ams_token");
     setProfessor(null);
   };
 
   // Global Hooks
-  const { apiBase, apiFetch, courses, courseId, setCourseId, loadBootstrap, health } =
-    useApi();
+  const { apiBase, apiFetch, courseId, setCourseId, loadBootstrap } = useApi();
   const {
     sessionId,
-    setSessionId,
     gradebook,
     setGradebook,
     attendance,
@@ -111,20 +109,17 @@ export default function App() {
 
   const {
     cameraRunning,
-    cameraDrops,
     startCamera,
     stopCamera,
     videoWorkerRef,
     captureCanvasRef,
     cameraActiveRef,
-    setCameraDrops,
   } = useCamera(toWsBase, apiBase);
 
   const { overlayRef, connectDashboardSocket, closeDashboardSocket } =
     useDashboardSocket(toWsBase, apiBase);
 
-  const { sending: emailSending, lastResult: emailLastResult, sendBulkEmail, clearResult: clearEmailResult } =
-    useEmail(apiFetch);
+  const { sending: emailSending, sendBulkEmail, clearResult: clearEmailResult } = useEmail(apiFetch);
 
   // Local State
   const [gradeEditor, setGradeEditor] = useState(null);
@@ -132,13 +127,6 @@ export default function App() {
   const [attendanceBusyByStudent, setAttendanceBusyByStudent] = useState({});
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [sessionEndTime, setSessionEndTime] = useState(null);
-  const [streamMetrics, setStreamMetrics] = useState({
-    incomingFps: 0,
-    drawFps: 0,
-    renderDrops: 0,
-    outgoingDrops: 0
-  });
-
   // Canvas Refs
   const viewportRef = useRef(null);
   const frameCanvasRef = useRef(null);
@@ -155,16 +143,7 @@ export default function App() {
   const presentCount = attendance.filter((r) => r.IsPresent).length;
   const absentCount = sessionId ? attendance.filter((r) => !r.IsPresent).length : 0;
 
-  const renderRef = useRef({
-    pendingFrame: null,
-    drawBusy: false,
-    lastDrawAt: 0,
-    lastImageWidth: 0,
-    lastImageHeight: 0,
-    incomingWindow: 0,
-    drawnWindow: 0,
-    droppedWindow: 0,
-  });
+  const renderRef = useRef({ lastImageWidth: 0, lastImageHeight: 0 });
 
   // Theme: follow prefers-color-scheme unless the user has toggled manually
   useEffect(() => {
@@ -271,25 +250,29 @@ export default function App() {
       const height = Math.max(1, bottom - top);
 
       const recognized = face.event_type === "recognized";
-      const label = recognized ? `${face.full_name || "Student"}` : "Unknown";
+      const absentHours = Number(face.session_absent_hours ?? 0);
+      const isLate = recognized && absentHours > 0;
+
+      let label;
+      if (!recognized) {
+        label = "Unknown";
+      } else if (isLate) {
+        label = `${face.full_name || "Student"} — Late (${absentHours}h absent)`;
+      } else {
+        label = face.full_name || "Student";
+      }
 
       let strokeColor;
       if (!recognized) {
-        strokeColor = "#f59e0b"; // unknown face → amber
+        strokeColor = "#f59e0b"; // unknown → amber
+      } else if (isLate) {
+        strokeColor = "#ef4444"; // late arrival → red
       } else {
         const row = attendanceRef.current.find(r => Number(r.StudentID) === Number(face.student_id));
-        if (row && row.IsPresent) {
-          strokeColor = "#10b981"; // present → green
+        if (row && row.ManualOverride && !row.IsPresent) {
+          strokeColor = "#ef4444"; // manually marked absent → red
         } else {
-          if (row && row.ManualOverride) {
-            // Manually marked absent — always red
-            strokeColor = "#ef4444";
-          } else {
-            // Not yet arrived: yellow within the 10-min grace window, red after
-            const start = sessionStartTimeRef.current;
-            const sessionAgeMs = start ? Date.now() - start.getTime() : Infinity;
-            strokeColor = sessionAgeMs <= 10 * 60 * 1000 ? "#f59e0b" : "#ef4444";
-          }
+          strokeColor = "#10b981"; // on time → green
         }
       }
 
@@ -390,30 +373,15 @@ export default function App() {
 
   // Render Loop — draws directly from local <video> element (zero network latency)
   useEffect(() => {
-    const render = renderRef.current;
     let rafId = 0;
 
     const frameLoop = () => {
       const video = videoWorkerRef.current;
-      if (video && video.readyState >= 2 && video.videoWidth > 0) {
+      if (video && video.readyState >= 2 && video.videoWidth > 0)
         drawFrame(video);
-        render.drawnWindow += 1;
-      }
       rafId = requestAnimationFrame(frameLoop);
     };
     rafId = requestAnimationFrame(frameLoop);
-
-    const metricTimer = setInterval(() => {
-      const state = renderRef.current;
-      setStreamMetrics({
-        incomingFps: 0,
-        drawFps: state.drawnWindow,
-        renderDrops: 0,
-        outgoingDrops: cameraDrops,
-      });
-      state.drawnWindow = 0;
-      setCameraDrops(0);
-    }, 1000);
 
     const resizeObserver = new ResizeObserver(() => {
       const video = videoWorkerRef.current;
@@ -426,10 +394,9 @@ export default function App() {
 
     return () => {
       cancelAnimationFrame(rafId);
-      clearInterval(metricTimer);
       resizeObserver.disconnect();
     };
-  }, [clearFrameCanvases, drawFrame, drawOverlay, setCameraDrops, cameraDrops, videoWorkerRef]);
+  }, [clearFrameCanvases, drawFrame, drawOverlay, videoWorkerRef]);
 
   // Session Handlers
   const handleStartSession = async () => {
@@ -558,9 +525,9 @@ export default function App() {
       onLogout={handleLogout}
       headerAction={
         <button
-          className={`h-8 px-4 font-medium text-xs transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${sessionId
-            ? "border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
-            : "bg-primary text-primary-fg hover:opacity-90"
+          className={`h-8 px-3 sm:px-4 rounded-sm font-medium text-[11px] sm:text-xs transition-all duration-300 ease-in-out cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${sessionId
+            ? "bg-bg text-fg border border-fg hover:bg-fg hover:text-bg"
+            : "bg-fg text-bg hover:opacity-80"
             }`}
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
           disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
@@ -570,46 +537,54 @@ export default function App() {
       }
     >
       {activeTab === 'dashboard' ? (
-        <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-300">
+          <div className="mb-1 sm:mb-2">
+            <StatCards
+              stats={[
+                {
+                  label: "Enrolled",
+                  value: enrolledCount,
+                  hint: "Total students registered",
+                  variant: "default",
+                },
+                {
+                  label: "Present",
+                  value: presentCount,
+                  hint: "Detected & checked-in",
+                  variant: "primary",
+                },
+                {
+                  label: "Absent",
+                  value: absentCount,
+                  hint: sessionId ? "Not yet present" : "No active lecture",
+                  variant: "danger",
+                },
+              ]}
+            />
+          </div>
 
-          <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="mb-2">
-              <StatCards
-                stats={[
-                  { label: "Enrolled", value: enrolledCount, hint: "Total students registered", variant: "default" },
-                  { label: "Present",  value: presentCount,  hint: "Detected & checked-in",    variant: "primary" },
-                  { label: "Absent",   value: absentCount,   hint: sessionId ? "Not yet present" : "No active lecture", variant: "danger" },
-                ]}
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 xl:grid-cols-12 min-h-[300px] sm:min-h-[400px]">
+            <div className="xl:col-span-5 h-full">
+              <CameraFeed
+                cameraRunning={cameraRunning}
+                viewportRef={viewportRef}
+                frameCanvasRef={frameCanvasRef}
+                overlayCanvasRef={overlayCanvasRef}
+                toggleCamera={toggleCamera}
+                sessionId={sessionId}
               />
             </div>
 
-            <div className="grid gap-6 grid-cols-1 xl:grid-cols-12 min-h-[400px]">
-              <div className="xl:col-span-5 h-full">
-                <CameraFeed
-                  cameraRunning={cameraRunning}
-                  viewportRef={viewportRef}
-                  frameCanvasRef={frameCanvasRef}
-                  overlayCanvasRef={overlayCanvasRef}
-                  streamMetrics={streamMetrics}
-                  toggleCamera={toggleCamera}
-                  sessionId={sessionId}
-                />
-              </div>
-
-              <div className="xl:col-span-7 h-full">
-                <AttendanceTable
-                  attendance={attendance}
-                  sessionId={sessionId}
-                  sessionStartTime={sessionStartTime}
-                  sessionEndTime={sessionEndTime}
-                  markManualAttendance={markManualAttendance}
-                  attendanceBusyByStudent={attendanceBusyByStudent}
-                />
-              </div>
+            <div className="xl:col-span-7 h-full">
+              <AttendanceTable
+                attendance={attendance}
+                sessionId={sessionId}
+                sessionStartTime={sessionStartTime}
+                sessionEndTime={sessionEndTime}
+                markManualAttendance={markManualAttendance}
+                attendanceBusyByStudent={attendanceBusyByStudent}
+              />
             </div>
-
-
-
           </div>
         </div>
       ) : activeTab === 'gradebook' ? (
@@ -640,9 +615,7 @@ export default function App() {
             <EmailPanel
               gradebook={gradebook}
               courseId={courseId}
-              apiFetch={apiFetch}
               sending={emailSending}
-              lastResult={emailLastResult}
               sendBulkEmail={sendBulkEmail}
               clearResult={clearEmailResult}
             />
@@ -651,7 +624,7 @@ export default function App() {
       ) : activeTab === 'history' ? (
         <div className="animate-in fade-in duration-300">
           <div className="mt-2">
-            <SessionHistory apiFetch={apiFetch} courseId={courseId} />
+            <SessionHistory apiFetch={apiFetch} courseId={courseId} activeSessionId={sessionId} />
           </div>
         </div>
       ) : null}

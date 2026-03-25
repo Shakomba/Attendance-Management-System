@@ -47,7 +47,8 @@ export function useCamera(toWsBase, apiBase) {
             return
         }
 
-        const ws = new WebSocket(`${toWsBase(apiBase)}/ws/camera/${activeSessionId}`)
+        const token = localStorage.getItem('ams_token') || ''
+        const ws = new WebSocket(`${toWsBase(apiBase)}/ws/camera/${activeSessionId}?token=${token}`)
         ws.binaryType = 'arraybuffer'
         cameraWsRef.current = ws
 

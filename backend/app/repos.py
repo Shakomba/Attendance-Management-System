@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import bcrypt as _bcrypt
 
 from .database import execute, fetch_all, fetch_one, get_connection
 
@@ -10,18 +11,25 @@ from .database import execute, fetch_all, fetch_one, get_connection
 class Repository:
     @staticmethod
     def authenticate_professor(username: str, password: str) -> Optional[Dict[str, Any]]:
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        # Fetch by username only — password verification happens in Python with bcrypt.
+        # If the stored hash is a legacy SHA-256 hex (64 chars), reject and require migration.
         row = fetch_one(
             """
             SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID,
-                   c.CourseName, c.CourseCode
+                   p.PasswordHash, c.CourseName, c.CourseCode
             FROM dbo.Professors p
             INNER JOIN dbo.Courses c ON c.CourseID = p.CourseID
-            WHERE p.Username = ? AND p.PasswordHash = ? AND p.IsActive = 1;
+            WHERE p.Username = ? AND p.IsActive = 1;
             """,
-            (username, password_hash),
+            (username,),
         )
         if not row:
+            return None
+        stored_hash: str = row["PasswordHash"] or ""
+        # Legacy SHA-256 hashes are 64 lowercase hex chars — reject them so admins must rehash.
+        if len(stored_hash) == 64 and all(c in "0123456789abcdef" for c in stored_hash):
+            return None
+        if not _bcrypt.checkpw(password.encode(), stored_hash.encode()):
             return None
         return {
             "professor_id": row["ProfessorID"],
@@ -362,6 +370,21 @@ class Repository:
 
         now_value = marked_at or datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
+        # Apply the same per-hour grace logic as face recognition.
+        course_row = fetch_one(
+            "SELECT LateGraceMinutes FROM dbo.Courses WHERE CourseID = ?;",
+            (course_id,),
+        )
+        grace = int(course_row["LateGraceMinutes"]) if course_row else 10
+        elapsed_seconds = (now_value - started_at).total_seconds()
+        if elapsed_seconds < 0:
+            elapsed_seconds = 0
+        minutes_into_hour = (elapsed_seconds % 3600) / 60
+        within_grace = minutes_into_hour <= grace
+        is_present_int = 1 if within_grace else 0
+        is_late_int = 0 if within_grace else 1
+        delay_minutes = int(elapsed_seconds // 60)
+
         with get_connection() as conn:
             cursor = conn.cursor()
 
@@ -383,18 +406,31 @@ class Repository:
                                 WHEN ? > target.LastSeenAt THEN ?
                                 ELSE target.LastSeenAt
                             END,
-                            IsPresent = 1,
-                            IsLate = 0,
-                            ArrivalDelayMinutes = NULL
+                            IsPresent = CASE
+                                WHEN target.IsPresent = 1 THEN 1
+                                ELSE ?
+                            END,
+                            IsLate = CASE
+                                WHEN target.IsPresent = 1 THEN target.IsLate
+                                ELSE ?
+                            END,
+                            ArrivalDelayMinutes = CASE
+                                WHEN target.FirstSeenAt IS NULL THEN ?
+                                ELSE target.ArrivalDelayMinutes
+                            END
                     WHEN NOT MATCHED THEN
                         INSERT (SessionID, StudentID, FirstSeenAt, LastSeenAt, IsPresent, IsLate, ArrivalDelayMinutes)
-                        VALUES (?, ?, ?, ?, 1, 0, NULL);
+                        VALUES (?, ?, ?, ?, ?, ?, ?);
                     """,
                     (
                         session_id, student_id,
                         now_value, now_value, now_value,
                         now_value, now_value, now_value,
+                        is_present_int,
+                        is_late_int,
+                        delay_minutes,
                         session_id, student_id, now_value, now_value,
+                        is_present_int, is_late_int, delay_minutes,
                     ),
                 )
             else:

@@ -4,49 +4,45 @@
 
 /* ── Light theme tokens ────────────────────────────────────────────── */
 :root {
-  --color-bg:         #FAFAFA;
-  --color-card:       #FFFFFF;
-  --color-fg:         #09090B;
-  --color-surface:    #F4F4F5;
-  --color-border:     #E4E4E7;
-  --color-secondary:  #71717A;
-  --color-primary:    #18181B;
-  --color-primary-fg: #FFFFFF;
+  --color-bg:        #FFFFFF;
+  --color-fg:        #09090B;
+  --color-primary:   #09090B;
+  --color-surface:   #FAFAFA;
+  --color-border:    #E4E4E7;
+  --color-secondary: #71717A;
 }
 
 /* ── Dark theme tokens ─────────────────────────────────────────────── */
 .dark {
-  --color-bg:         #111113;
-  --color-card:       #18181B;
-  --color-fg:         #F1F1F3;
-  --color-surface:    #27272A;
-  --color-border:     #3F3F46;
-  --color-secondary:  #A1A1AA;
-  --color-primary:    #E4E4E7;
-  --color-primary-fg: #09090B;
+  --color-bg:        #111113;
+  --color-fg:        #F1F1F3;
+  --color-primary:   #F1F1F3;
+  --color-surface:   #1C1C1F;
+  --color-border:    #2E2E32;
+  --color-secondary: #9B9BA6;
 }
 
 @layer base {
   body {
-    @apply bg-bg text-fg min-h-screen font-sans antialiased;
+    @apply bg-bg text-fg min-h-screen font-sans antialiased transition-colors duration-200;
   }
 }
 
 @layer components {
   .standard-card {
-    @apply bg-card border border-border shadow-sm overflow-hidden;
+    @apply bg-bg border border-border shadow-sm rounded-none sm:rounded-sm overflow-hidden;
   }
 
   .stat-card {
-    @apply standard-card p-5;
+    @apply standard-card p-3 sm:p-6 flex flex-col justify-center;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-fg text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-bg text-sm font-medium rounded-sm hover:opacity-80 transition-colors focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-card text-fg border border-border text-sm font-medium hover:bg-surface transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 bg-bg text-fg border border-border text-sm font-medium rounded-sm hover:bg-surface transition-colors focus:outline-none focus:ring-2 focus:ring-border disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
 
   .mono-data {
@@ -54,22 +50,42 @@
   }
 
   .ui-input {
-    @apply border border-border bg-card text-sm px-3 py-2 text-fg placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:border-primary disabled:opacity-50 disabled:bg-surface transition-all;
+    @apply border border-border bg-bg text-sm rounded-sm px-3 py-2 text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary disabled:opacity-50 disabled:bg-surface;
   }
 }
 
-/* ── Page transition ───────────────────────────────────────────────── */
+/* ── Mobile touch targets & tap highlight ────────────────────────── */
+@media (max-width: 639px) {
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Prevent horizontal overflow on mobile */
+  html, body {
+    overflow-x: hidden;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out forwards;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* ── Scrollbar ─────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-secondary); }
+/* Custom crisp scrollbar for data density */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-secondary);
+}

@@ -95,8 +95,8 @@ CREATE TABLE dbo.Enrollments
 
     HoursAbsentTotal  DECIMAL(8,2) NOT NULL CONSTRAINT DF_Enrollments_HoursAbsent DEFAULT (0),
 
-    /* Auto penalty: -0.5 for each absent hour */
-    AttendancePenalty AS CAST(HoursAbsentTotal * 0.5 AS DECIMAL(8,2)) PERSISTED,
+    /* Auto penalty: -1 per absent hour, capped at 5 */
+    AttendancePenalty AS CAST(CASE WHEN HoursAbsentTotal >= 5 THEN 5.0 ELSE HoursAbsentTotal END AS DECIMAL(8,2)) PERSISTED,
 
     /* Raw sum of all grade components */
     RawTotal          AS CAST(
@@ -109,11 +109,11 @@ CREATE TABLE dbo.Enrollments
                           CASE
                               WHEN (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.5)) < 0
+                                  - CASE WHEN HoursAbsentTotal >= 5 THEN 5.0 ELSE HoursAbsentTotal END) < 0
                               THEN 0
                               ELSE (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.5))
+                                  - CASE WHEN HoursAbsentTotal >= 5 THEN 5.0 ELSE HoursAbsentTotal END)
                           END AS DECIMAL(8,2)) PERSISTED,
 
     /* At-risk policy:
@@ -124,11 +124,11 @@ CREATE TABLE dbo.Enrollments
                             CASE
                               WHEN (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.5)) < 0
+                                  - CASE WHEN HoursAbsentTotal >= 5 THEN 5.0 ELSE HoursAbsentTotal END) < 0
                               THEN 0
                               ELSE (ISNULL(Quiz1,0) + ISNULL(Quiz2,0) + ISNULL(ProjectGrade,0)
                                   + ISNULL(AssignmentGrade,0) + ISNULL(MidtermGrade,0) + ISNULL(FinalExamGrade,0)
-                                  - (HoursAbsentTotal * 0.5))
+                                  - CASE WHEN HoursAbsentTotal >= 5 THEN 5.0 ELSE HoursAbsentTotal END)
                             END
                           ) < 60 OR HoursAbsentTotal >= 4 THEN 1 ELSE 0 END AS BIT) PERSISTED,
 
@@ -265,6 +265,8 @@ BEGIN
     DECLARE @DelayMinutes INT;
     DECLARE @HourIndex INT;
     DECLARE @HourStart DATETIME2(0);
+    DECLARE @MinutesIntoHour INT;
+    DECLARE @WithinGrace BIT;
 
     SET @RecognizedAt = ISNULL(@RecognizedAt, SYSUTCDATETIME());
 
@@ -284,6 +286,9 @@ BEGIN
 
     SET @HourIndex = @DelayMinutes / 60;
     SET @HourStart = DATEADD(HOUR, @HourIndex, @SessionStart);
+    -- Minutes into the CURRENT hour — resets to 0 at each hour boundary.
+    SET @MinutesIntoHour = DATEDIFF(MINUTE, @HourStart, @RecognizedAt);
+    SET @WithinGrace = CASE WHEN @MinutesIntoHour <= @GraceMinutes THEN 1 ELSE 0 END;
 
     MERGE dbo.SessionAttendance AS target
     USING (SELECT @SessionID AS SessionID, @StudentID AS StudentID) AS src
@@ -291,7 +296,8 @@ BEGIN
     WHEN MATCHED THEN
         UPDATE SET
             FirstSeenAt = CASE
-                            WHEN target.FirstSeenAt IS NULL THEN @RecognizedAt
+                            WHEN target.FirstSeenAt IS NULL AND @WithinGrace = 1 THEN @RecognizedAt
+                            WHEN target.FirstSeenAt IS NULL THEN target.FirstSeenAt
                             WHEN @RecognizedAt < target.FirstSeenAt THEN @RecognizedAt
                             ELSE target.FirstSeenAt
                           END,
@@ -300,13 +306,18 @@ BEGIN
                             WHEN @RecognizedAt > target.LastSeenAt THEN @RecognizedAt
                             ELSE target.LastSeenAt
                          END,
-            IsPresent = 1,
+            -- Once present, stay present. Otherwise only upgrade if within this hour's grace window.
+            IsPresent = CASE
+                            WHEN target.IsPresent = 1 THEN 1
+                            WHEN @WithinGrace = 1 THEN 1
+                            ELSE 0
+                        END,
             IsLate = CASE
-                        WHEN target.FirstSeenAt IS NULL AND @DelayMinutes > @GraceMinutes THEN 1
+                        WHEN target.FirstSeenAt IS NULL AND @WithinGrace = 0 THEN 1
                         ELSE target.IsLate
                      END,
             ArrivalDelayMinutes = CASE
-                                    WHEN target.FirstSeenAt IS NULL THEN @DelayMinutes
+                                    WHEN target.FirstSeenAt IS NULL AND @WithinGrace = 1 THEN @DelayMinutes
                                     ELSE target.ArrivalDelayMinutes
                                   END
     WHEN NOT MATCHED THEN
@@ -314,13 +325,14 @@ BEGIN
         VALUES (
             @SessionID,
             @StudentID,
+            CASE WHEN @WithinGrace = 1 THEN @RecognizedAt ELSE NULL END,
             @RecognizedAt,
-            @RecognizedAt,
-            1,
-            CASE WHEN @DelayMinutes > @GraceMinutes THEN 1 ELSE 0 END,
+            @WithinGrace,
+            CASE WHEN @WithinGrace = 0 THEN 1 ELSE 0 END,
             @DelayMinutes
         );
 
+    -- Only log the student as present for this hour if within the grace window.
     MERGE dbo.SessionHourLog AS target
     USING (
         SELECT
@@ -333,10 +345,12 @@ BEGIN
        AND target.StudentID = src.StudentID
        AND target.HourIndex = src.HourIndex
     WHEN MATCHED THEN
-        UPDATE SET IsPresent = 1, Source = N'recognizer'
+        UPDATE SET
+            IsPresent = CASE WHEN @WithinGrace = 1 THEN 1 ELSE IsPresent END,
+            Source = CASE WHEN @WithinGrace = 1 THEN N'recognizer' ELSE Source END
     WHEN NOT MATCHED THEN
         INSERT (SessionID, StudentID, HourIndex, HourStart, IsPresent, Source)
-        VALUES (src.SessionID, src.StudentID, src.HourIndex, src.HourStart, 1, N'recognizer');
+        VALUES (src.SessionID, src.StudentID, src.HourIndex, src.HourStart, @WithinGrace, N'recognizer');
 END
 GO
 

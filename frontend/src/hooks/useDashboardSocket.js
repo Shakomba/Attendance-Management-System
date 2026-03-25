@@ -59,7 +59,8 @@ export function useDashboardSocket(toWsBase, apiBase) {
         (activeSessionId, { appendEvent, applyPresenceToAttendance, refreshAttendance, drawOverlay }) => {
             closeDashboardSocket()
 
-            const ws = new WebSocket(`${toWsBase(apiBase)}/ws/dashboard/${activeSessionId}`)
+            const token = localStorage.getItem('ams_token') || ''
+            const ws = new WebSocket(`${toWsBase(apiBase)}/ws/dashboard/${activeSessionId}?token=${token}`)
             dashboardWsRef.current = ws
             setDashboardWsState('connecting')
 

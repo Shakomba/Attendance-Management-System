@@ -1,19 +1,35 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import math
 import os
+import random
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+import bcrypt as _bcrypt
+
 _DEFAULT_STATE_FILE = Path(__file__).resolve().parent.parent / "demo_data" / "state.json"
 
 
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def _bcrypt_hash(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+
+def _bcrypt_verify(password: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(password.encode(), hashed.encode())
+
+# Professor seed — plaintext passwords only exist at startup; stored as bcrypt hashes.
+_PROFESSOR_SEED = [
+    {"ProfessorID": 1, "Username": "mr.halgurd",  "Password": "sXtLC8K7KkK2VzLz7D", "FullName": "Mr. Halgurd Rasul",    "CourseID": 1},
+    {"ProfessorID": 2, "Username": "dr.saman",    "Password": "CepEdyR181lZSZHhUP", "FullName": "Dr. Saman Mohammad",   "CourseID": 2},
+    {"ProfessorID": 3, "Username": "mr.jafar",    "Password": "zVmgdH7Lv0gQrzgESW", "FullName": "Mr. Jafar Majidpoor",  "CourseID": 3},
+    {"ProfessorID": 4, "Username": "mr.awder",    "Password": "pZZOIjldVUjZ8l1vV0", "FullName": "Mr. Awder Sardar",     "CourseID": 4},
+    {"ProfessorID": 5, "Username": "mrs.sakar",   "Password": "DftGKz3DUpLkF5rxdY", "FullName": "Mrs. Sakar Omar",      "CourseID": 5},
+]
 
 
 class DemoRepository:
@@ -23,8 +39,8 @@ class DemoRepository:
         self.courses: Dict[int, Dict[str, Any]] = {
             1: {
                 "CourseID": 1,
-                "CourseCode": "CS101",
-                "CourseName": "Distributed AI Systems",
+                "CourseCode": "CS201",
+                "CourseName": "Database Systems",
                 "ScheduledStartTime": "09:00:00",
                 "LateGraceMinutes": 10,
                 "MaxAllowedAbsentHours": 4,
@@ -32,9 +48,36 @@ class DemoRepository:
             },
             2: {
                 "CourseID": 2,
-                "CourseCode": "CS102",
-                "CourseName": "Applied Machine Vision",
+                "CourseCode": "CS202",
+                "CourseName": "Data Structure and Algorithms",
+                "ScheduledStartTime": "10:30:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            3: {
+                "CourseID": 3,
+                "CourseCode": "CS203",
+                "CourseName": "Computer Networks",
                 "ScheduledStartTime": "13:00:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            4: {
+                "CourseID": 4,
+                "CourseCode": "CS204",
+                "CourseName": "Engineering Analysis",
+                "ScheduledStartTime": "14:30:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            5: {
+                "CourseID": 5,
+                "CourseCode": "CS205",
+                "CourseName": "Software Requirement and Analysis",
+                "ScheduledStartTime": "16:00:00",
                 "LateGraceMinutes": 10,
                 "MaxAllowedAbsentHours": 4,
                 "IsActive": 1,
@@ -42,14 +85,15 @@ class DemoRepository:
         }
 
         self.professors: Dict[str, Dict[str, Any]] = {
-            "dr.ahmed": {
-                "ProfessorID": 1,
-                "Username": "dr.ahmed",
-                "PasswordHash": _hash_password("admin123"),
-                "FullName": "Dr. Ahmed Hassan",
-                "CourseID": 1,
+            p["Username"]: {
+                "ProfessorID": p["ProfessorID"],
+                "Username": p["Username"],
+                "PasswordHash": _bcrypt_hash(p["Password"]),
+                "FullName": p["FullName"],
+                "CourseID": p["CourseID"],
                 "IsActive": 1,
-            },
+            }
+            for p in _PROFESSOR_SEED
         }
 
         self.students: Dict[int, Dict[str, Any]] = {}
@@ -167,6 +211,7 @@ class DemoRepository:
             print(f"[demo_repo] State load failed (starting fresh): {exc}")
 
     def _seed_demo_data(self) -> None:
+        rng = random.Random(20260325)
         new_students = [
             ("S001", "Redeen Sirwan", "redeen.611224020@uor.edu.krd"),
             ("S002", "Rebin Hussain", "rebin.611224019@uor.edu.krd"),
@@ -189,18 +234,17 @@ class DemoRepository:
                 "CreatedAt": self._utcnow(),
             }
 
-            for course_id in [1, 2]:
-                modifier = int(code[-1])
+            for course_id in sorted(self.courses.keys()):
                 self.enrollments[(student_id, course_id)] = {
                     "StudentID": student_id,
                     "CourseID": course_id,
-                    "Quiz1": max(3.0, 6.0 - modifier * 0.5),
-                    "Quiz2": max(3.0, 6.0 - modifier * 0.5),
-                    "ProjectGrade": max(6.0, 12.0 - modifier),
-                    "AssignmentGrade": max(3.0, 6.0 - modifier * 0.5),
-                    "MidtermGrade": max(10.0, 20.0 - modifier),
-                    "FinalExamGrade": max(25.0, 50.0 - modifier * 2.5),
-                    "HoursAbsentTotal": 0.0,
+                    "Quiz1": round(rng.uniform(4.0, 9.5), 2),
+                    "Quiz2": round(rng.uniform(4.0, 9.5), 2),
+                    "ProjectGrade": round(rng.uniform(8.0, 14.5), 2),
+                    "AssignmentGrade": round(rng.uniform(4.0, 9.5), 2),
+                    "MidtermGrade": round(rng.uniform(12.0, 24.0), 2),
+                    "FinalExamGrade": round(rng.uniform(28.0, 48.0), 2),
+                    "HoursAbsentTotal": round(rng.uniform(0.0, 2.0), 1),
                     "UpdatedAt": self._utcnow(),
                 }
 
@@ -271,6 +315,15 @@ class DemoRepository:
         return stats
 
     @staticmethod
+    def _session_absent_hours(session_start: datetime, arrival_time: datetime, grace_minutes: int) -> int:
+        """Hours a student missed before they arrived.
+        e.g. arrive at 11 min → 1 absent hour; arrive at 71 min → 2 absent hours."""
+        elapsed_minutes = (arrival_time - session_start).total_seconds() / 60
+        if elapsed_minutes <= grace_minutes:
+            return 0
+        return math.ceil((elapsed_minutes - grace_minutes) / 60)
+
+    @staticmethod
     def _compute_metrics(enrollment: Dict[str, Any], max_absent: int) -> Dict[str, Any]:
         raw_total = (
             float(enrollment["Quiz1"])
@@ -280,7 +333,7 @@ class DemoRepository:
             + float(enrollment["MidtermGrade"])
             + float(enrollment["FinalExamGrade"])
         )
-        penalty = float(enrollment["HoursAbsentTotal"]) * 0.5
+        penalty = min(float(enrollment["HoursAbsentTotal"]), 5.0)
         adjusted = max(0.0, raw_total - penalty)
         at_risk_policy = adjusted < 60 or float(enrollment["HoursAbsentTotal"]) >= max_absent
         return {
@@ -295,7 +348,7 @@ class DemoRepository:
         prof = self.professors.get(username)
         if not prof or prof["IsActive"] != 1:
             return None
-        if _hash_password(password) != prof["PasswordHash"]:
+        if not _bcrypt_verify(password, prof["PasswordHash"]):
             return None
         course = self.courses.get(prof["CourseID"])
         return {
@@ -570,11 +623,9 @@ class DemoRepository:
         if existing and existing.get("_ManualLock"):
             return
 
-        delay = int((recognized_at - session["StartedAt"]).total_seconds() // 60)
-        if delay < 0:
-            delay = 0
         grace = int(course["LateGraceMinutes"])
-        within_grace = delay <= grace
+        session_start = session["StartedAt"]
+        absent_hours = self._session_absent_hours(session_start, recognized_at, grace)
 
         if not existing:
             self.session_attendance[key] = {
@@ -582,24 +633,21 @@ class DemoRepository:
                 "StudentID": student_id,
                 "FirstSeenAt": recognized_at,
                 "LastSeenAt": recognized_at,
-                "IsPresent": 1 if within_grace else 0,
+                "IsPresent": 1,
+                "SessionAbsentHours": absent_hours,
             }
-            if within_grace:
-                self._save_state()
+            self._save_state()
         else:
             last = existing.get("LastSeenAt")
             existing["LastSeenAt"] = recognized_at if last is None else max(last, recognized_at)
-            if existing.get("IsPresent"):
-                # Already present — just update timestamps, don't change status
-                if existing.get("FirstSeenAt") is None:
-                    existing["FirstSeenAt"] = recognized_at
-            elif within_grace:
-                # Still within grace window — mark present now
-                first = existing.get("FirstSeenAt")
-                existing["FirstSeenAt"] = recognized_at if first is None else min(first, recognized_at)
-                existing["IsPresent"] = 1
-                self._save_state()
-            # else: after grace, student stays absent
+            if existing.get("FirstSeenAt") is None:
+                existing["FirstSeenAt"] = recognized_at
+            # Always mark present; keep the earliest (best) absent_hours if already set
+            existing["IsPresent"] = 1
+            existing["SessionAbsentHours"] = min(
+                existing.get("SessionAbsentHours", absent_hours), absent_hours
+            )
+            self._save_state()
 
     def get_session_attendance(self, session_id: str) -> List[Dict[str, Any]]:
         session = self.sessions.get(session_id)
@@ -626,6 +674,7 @@ class DemoRepository:
                     "FirstSeenAt": attendance.get("FirstSeenAt"),
                     "LastSeenAt": attendance.get("LastSeenAt"),
                     "IsPresent": attendance.get("IsPresent", 0),
+                    "SessionAbsentHours": attendance.get("SessionAbsentHours", 0),
                     "ManualOverride": bool(attendance.get("_ManualLock", False)),
                 }
             )
@@ -652,6 +701,10 @@ class DemoRepository:
         key = (session_id, student_id)
 
         if is_present:
+            course = self.courses.get(course_id, {})
+            grace = int(course.get("LateGraceMinutes", 10))
+            absent_hours = self._session_absent_hours(session["StartedAt"], now_value, grace)
+
             existing = self.session_attendance.get(key)
             if not existing:
                 self.session_attendance[key] = {
@@ -660,14 +713,16 @@ class DemoRepository:
                     "FirstSeenAt": now_value,
                     "LastSeenAt": now_value,
                     "IsPresent": 1,
+                    "SessionAbsentHours": absent_hours,
                     "_ManualLock": True,
                 }
             else:
-                first_seen = existing.get("FirstSeenAt")
                 last_seen = existing.get("LastSeenAt")
-                existing["FirstSeenAt"] = now_value if first_seen is None else min(first_seen, now_value)
                 existing["LastSeenAt"] = now_value if last_seen is None else max(last_seen, now_value)
+                if existing.get("FirstSeenAt") is None:
+                    existing["FirstSeenAt"] = now_value
                 existing["IsPresent"] = 1
+                existing["SessionAbsentHours"] = absent_hours
                 existing["_ManualLock"] = True
         else:
             self.session_attendance[key] = {
@@ -702,6 +757,7 @@ class DemoRepository:
             "IsPresent": row.get("IsPresent", 0),
             "FirstSeenAt": row.get("FirstSeenAt"),
             "LastSeenAt": row.get("LastSeenAt"),
+            "SessionAbsentHours": row.get("SessionAbsentHours", 0),
             "_ManualLock": row.get("_ManualLock", False),
         }
 
@@ -755,21 +811,13 @@ class DemoRepository:
 
         for student_id in enrolled_ids:
             att = self.session_attendance.get((session_id, student_id))
-            first_seen = att.get("FirstSeenAt") if att else None
 
-            # Normalise to timezone-naive for consistent comparison with start_at
-            if first_seen is not None and getattr(first_seen, "tzinfo", None) is not None:
-                first_seen = first_seen.replace(tzinfo=None)
-
-            absent_weight = 0.0
-            for hour_index in range(total_hours):
-                hour_start = start_at + timedelta(hours=hour_index)
-                grace_end = hour_start + timedelta(minutes=grace_minutes)
-
-                if first_seen is None or first_seen > grace_end:
-                    # Never arrived or arrived after the grace window — absent for this hour
-                    absent_weight += 1.0
-                # else: arrived within grace window — present for this hour
+            if att and att.get("IsPresent"):
+                # Use the stored SessionAbsentHours (set at recognition/manual time)
+                absent_weight = float(att.get("SessionAbsentHours", 0))
+            else:
+                # Never showed up — absent for all hours
+                absent_weight = float(total_hours)
 
             enr = self.enrollments.get((student_id, course_id))
             if enr:

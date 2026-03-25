@@ -18,7 +18,6 @@ services:
   # Run once when you need to (re)initialize schema:
   # docker compose -f docker-compose.yml --profile db-init up sql-init
   sql-init:
-    # Use the generic image you confirmed is available
     image: mcr.microsoft.com/mssql-tools
     container_name: ams_sql_init
     profiles: ["db-init"]
@@ -32,12 +31,10 @@ services:
       /bin/bash -lc "
       set -e;
       for i in {1..60}; do
-        # FIXED: Removed the '18' from the path below
         /opt/mssql-tools/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" && break;
         echo 'Waiting for SQL Server...';
         sleep 5;
       done;
-      # FIXED: Removed the '18' from the path below
       /opt/mssql-tools/bin/sqlcmd -S sqlserver,1433 -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -i /scripts/01_init_schema.sql;
       echo 'Schema init completed.';
       "
@@ -50,29 +47,23 @@ services:
     build:
       context: .
       dockerfile_inline: |
-        FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        FROM python:3.11-slim
         ENV PYTHONDONTWRITEBYTECODE=1
         ENV PYTHONUNBUFFERED=1
         ENV DEBIAN_FRONTEND=noninteractive
 
-        # Install Python 3.11, build tools, and system libraries
+        # Install system dependencies
         RUN apt-get update && apt-get install -y --no-install-recommends \
-            software-properties-common && \
-            add-apt-repository ppa:deadsnakes/ppa && \
-            apt-get update && apt-get install -y --no-install-recommends \
-            python3.11 python3.11-venv python3.11-dev python3-pip \
             curl ca-certificates gnupg2 \
             unixodbc unixodbc-dev \
             gcc g++ build-essential cmake \
             libgl1 libglib2.0-0 libgomp1 \
-          && rm -rf /var/lib/apt/lists/* \
-          && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-          && ln -sf /usr/bin/python3.11 /usr/bin/python
+          && rm -rf /var/lib/apt/lists/*
 
-        # Install MSSQL ODBC driver (Ubuntu 22.04)
+        # Install MSSQL ODBC driver (Debian 12 / Bookworm)
         RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
             | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
-          && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" \
+          && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
             > /etc/apt/sources.list.d/mssql-release.list \
           && apt-get update \
           && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
@@ -80,10 +71,8 @@ services:
 
         WORKDIR /app
         COPY backend/requirements.txt /tmp/requirements.txt
-        RUN python -m pip install --upgrade pip \
-          && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
-          && python -m pip uninstall -y onnxruntime onnxruntime-rocm || true \
-          && python -m pip install --no-cache-dir onnxruntime-gpu==1.20.1
+        RUN pip install --upgrade pip \
+          && pip install --no-cache-dir -r /tmp/requirements.txt
         COPY backend /app
 
         EXPOSE 8000
@@ -104,8 +93,7 @@ services:
       SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
       SQL_TRUST_SERVER_CERT: "yes"
 
-      # Set AI_MODE=gpu if you have a CUDA-capable GPU.
-      AI_MODE: ${AI_MODE:-cpu}
+      AI_MODE: "cpu"
       CPU_FACE_DETECT_MODEL: ${CPU_FACE_DETECT_MODEL:-hog}
       CPU_DISTANCE_THRESHOLD: ${CPU_DISTANCE_THRESHOLD:-0.45}
       GPU_COSINE_THRESHOLD: ${GPU_COSINE_THRESHOLD:-0.55}
@@ -119,11 +107,8 @@ services:
       SMTP_FROM: ${SMTP_FROM:-Attendance Bot <no-reply@example.com>}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       SMTP_DRY_RUN: ${SMTP_DRY_RUN:-true}
-
-      # NVIDIA_VISIBLE_DEVICES: "all"
-      # NVIDIA_DRIVER_CAPABILITIES: "compute,utility,video"
-    # gpus: all   # disabled — no GPU on this machine
     volumes:
+      - ./backend/app:/app/app
       - ./student_photos:/app/student_photos
       - ./demo_data:/app/demo_data
     ports:
