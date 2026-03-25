@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
@@ -23,8 +24,8 @@ class DemoRepository:
         self.courses: Dict[int, Dict[str, Any]] = {
             1: {
                 "CourseID": 1,
-                "CourseCode": "CS101",
-                "CourseName": "Distributed AI Systems",
+                "CourseCode": "CS201",
+                "CourseName": "Database Systems",
                 "ScheduledStartTime": "09:00:00",
                 "LateGraceMinutes": 10,
                 "MaxAllowedAbsentHours": 4,
@@ -32,9 +33,36 @@ class DemoRepository:
             },
             2: {
                 "CourseID": 2,
-                "CourseCode": "CS102",
-                "CourseName": "Applied Machine Vision",
+                "CourseCode": "CS202",
+                "CourseName": "Data Structure and Algorithms",
+                "ScheduledStartTime": "10:30:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            3: {
+                "CourseID": 3,
+                "CourseCode": "CS203",
+                "CourseName": "Computer Networks",
                 "ScheduledStartTime": "13:00:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            4: {
+                "CourseID": 4,
+                "CourseCode": "CS204",
+                "CourseName": "Engineering Analysis",
+                "ScheduledStartTime": "14:30:00",
+                "LateGraceMinutes": 10,
+                "MaxAllowedAbsentHours": 4,
+                "IsActive": 1,
+            },
+            5: {
+                "CourseID": 5,
+                "CourseCode": "CS205",
+                "CourseName": "Software Requirement and Analysis",
+                "ScheduledStartTime": "16:00:00",
                 "LateGraceMinutes": 10,
                 "MaxAllowedAbsentHours": 4,
                 "IsActive": 1,
@@ -42,12 +70,44 @@ class DemoRepository:
         }
 
         self.professors: Dict[str, Dict[str, Any]] = {
-            "dr.ahmed": {
+            "mr.halgurd": {
                 "ProfessorID": 1,
-                "Username": "dr.ahmed",
-                "PasswordHash": _hash_password("admin123"),
-                "FullName": "Dr. Ahmed Hassan",
+                "Username": "mr.halgurd",
+                "PasswordHash": _hash_password("sXtLC8K7KkK2VzLz7D"),
+                "FullName": "Mr. Halgurd Rasul",
                 "CourseID": 1,
+                "IsActive": 1,
+            },
+            "dr.saman": {
+                "ProfessorID": 2,
+                "Username": "dr.saman",
+                "PasswordHash": _hash_password("CepEdyR181lZSZHhUP"),
+                "FullName": "Dr. Saman Mohammad",
+                "CourseID": 2,
+                "IsActive": 1,
+            },
+            "mr.jafar": {
+                "ProfessorID": 3,
+                "Username": "mr.jafar",
+                "PasswordHash": _hash_password("zVmgdH7Lv0gQrzgESW"),
+                "FullName": "Mr. Jafar Majidpoor",
+                "CourseID": 3,
+                "IsActive": 1,
+            },
+            "mr.awder": {
+                "ProfessorID": 4,
+                "Username": "mr.awder",
+                "PasswordHash": _hash_password("pZZOIjldVUjZ8l1vV0"),
+                "FullName": "Mr. Awder Sardar",
+                "CourseID": 4,
+                "IsActive": 1,
+            },
+            "mrs.sakar": {
+                "ProfessorID": 5,
+                "Username": "mrs.sakar",
+                "PasswordHash": _hash_password("DftGKz3DUpLkF5rxdY"),
+                "FullName": "Mrs. Sakar Omar",
+                "CourseID": 5,
                 "IsActive": 1,
             },
         }
@@ -167,6 +227,7 @@ class DemoRepository:
             print(f"[demo_repo] State load failed (starting fresh): {exc}")
 
     def _seed_demo_data(self) -> None:
+        rng = random.Random(20260325)
         new_students = [
             ("S001", "Redeen Sirwan", "redeen.611224020@uor.edu.krd"),
             ("S002", "Rebin Hussain", "rebin.611224019@uor.edu.krd"),
@@ -189,18 +250,17 @@ class DemoRepository:
                 "CreatedAt": self._utcnow(),
             }
 
-            for course_id in [1, 2]:
-                modifier = int(code[-1])
+            for course_id in sorted(self.courses.keys()):
                 self.enrollments[(student_id, course_id)] = {
                     "StudentID": student_id,
                     "CourseID": course_id,
-                    "Quiz1": max(3.0, 6.0 - modifier * 0.5),
-                    "Quiz2": max(3.0, 6.0 - modifier * 0.5),
-                    "ProjectGrade": max(6.0, 12.0 - modifier),
-                    "AssignmentGrade": max(3.0, 6.0 - modifier * 0.5),
-                    "MidtermGrade": max(10.0, 20.0 - modifier),
-                    "FinalExamGrade": max(25.0, 50.0 - modifier * 2.5),
-                    "HoursAbsentTotal": 0.0,
+                    "Quiz1": round(rng.uniform(4.0, 9.5), 2),
+                    "Quiz2": round(rng.uniform(4.0, 9.5), 2),
+                    "ProjectGrade": round(rng.uniform(8.0, 14.5), 2),
+                    "AssignmentGrade": round(rng.uniform(4.0, 9.5), 2),
+                    "MidtermGrade": round(rng.uniform(12.0, 24.0), 2),
+                    "FinalExamGrade": round(rng.uniform(28.0, 48.0), 2),
+                    "HoursAbsentTotal": round(rng.uniform(0.0, 2.0), 1),
                     "UpdatedAt": self._utcnow(),
                 }
 

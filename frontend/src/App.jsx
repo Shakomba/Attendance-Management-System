@@ -558,9 +558,9 @@ export default function App() {
       onLogout={handleLogout}
       headerAction={
         <button
-          className={`h-8 px-4 font-medium text-xs transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${sessionId
-            ? "border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
-            : "bg-primary text-primary-fg hover:opacity-90"
+          className={`h-8 px-4 rounded-sm font-medium text-xs transition-all duration-300 ease-in-out disabled:opacity-40 disabled:cursor-not-allowed ${sessionId
+            ? "bg-bg text-fg border border-fg hover:bg-fg hover:text-bg"
+            : "bg-fg text-bg hover:opacity-80"
             }`}
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
           disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
@@ -576,9 +576,24 @@ export default function App() {
             <div className="mb-2">
               <StatCards
                 stats={[
-                  { label: "Enrolled", value: enrolledCount, hint: "Total students registered", variant: "default" },
-                  { label: "Present",  value: presentCount,  hint: "Detected & checked-in",    variant: "primary" },
-                  { label: "Absent",   value: absentCount,   hint: sessionId ? "Not yet present" : "No active lecture", variant: "danger" },
+                  {
+                    label: "Enrolled",
+                    value: enrolledCount,
+                    hint: "Total students registered",
+                    variant: "default",
+                  },
+                  {
+                    label: "Present",
+                    value: presentCount,
+                    hint: "Detected & checked-in",
+                    variant: "primary",
+                  },
+                  {
+                    label: "Absent",
+                    value: absentCount,
+                    hint: sessionId ? "Not yet present" : "No active lecture",
+                    variant: "danger",
+                  },
                 ]}
               />
             </div>
