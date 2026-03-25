@@ -449,12 +449,15 @@ class DemoRepository:
 
             started = session.get("StartedAt")
             ended = session.get("EndedAt")
+            status = str(session.get("Status", "unknown")).lower()
+            if ended is not None:
+                status = "finalized"
             result.append({
                 "session_id": session_id,
                 "course_name": course_name,
                 "started_at": started.isoformat() if started else None,
                 "ended_at": ended.isoformat() if ended else None,
-                "status": session.get("Status", "unknown"),
+                "status": status,
                 "total_enrolled": total_enrolled,
                 "present_count": present_count,
                 "absent_count": total_enrolled - present_count,

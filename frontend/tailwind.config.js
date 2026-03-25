@@ -8,21 +8,22 @@ export default {
     theme: {
         extend: {
             colors: {
-                // primary stays hardcoded — black accent works on any background
                 primary: {
-                    DEFAULT: '#09090B',
+                    DEFAULT: 'var(--color-primary)',
+                    fg:      'var(--color-primary-fg)',
                 },
-                // semantic tokens driven by CSS variables — swap automatically on .dark
                 secondary: 'var(--color-secondary)',
                 bg:        'var(--color-bg)',
+                card:      'var(--color-card)',
                 fg:        'var(--color-fg)',
                 surface:   'var(--color-surface)',
                 border:    'var(--color-border)',
             },
             fontFamily: {
-                sans: ['"Fira Sans"', 'system-ui', 'sans-serif'],
-                mono: ['"Fira Code"', 'monospace'],
-            }
+                sans:    ['Inter', 'system-ui', 'sans-serif'],
+                display: ['Outfit', 'system-ui', 'sans-serif'],
+                mono:    ['"IBM Plex Mono"', 'monospace'],
+            },
         },
     },
     plugins: [],
