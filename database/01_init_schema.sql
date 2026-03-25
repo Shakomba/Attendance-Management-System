@@ -499,12 +499,43 @@ GO
 /* ---------- Starter seed data ---------- */
 INSERT INTO dbo.Courses (CourseCode, CourseName, ScheduledStartTime, LateGraceMinutes, MaxAllowedAbsentHours)
 VALUES
-    (N'CS101', N'Distributed AI Systems', '09:00:00', 10, 4),
-    (N'CS102', N'Applied Machine Vision', '13:00:00', 10, 4);
+    (N'CS201', N'Database Systems', '09:00:00', 10, 4),
+    (N'CS202', N'Data Structure and Algorithms', '10:30:00', 10, 4),
+    (N'CS203', N'Computer Networks', '13:00:00', 10, 4),
+    (N'CS204', N'Engineering Analysis', '14:30:00', 10, 4),
+    (N'CS205', N'Software Requirement and Analysis', '16:00:00', 10, 4);
 GO
 
--- Password: admin123  (SHA-256 hash)
 INSERT INTO dbo.Professors (Username, PasswordHash, FullName, CourseID)
 VALUES
-    (N'dr.ahmed', N'240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', N'Dr. Ahmed Hassan', 1);
+    (N'mr.halgurd', LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', N'sXtLC8K7KkK2VzLz7D'), 2)), N'Mr. Halgurd Rasul', 1),
+    (N'dr.saman', LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', N'CepEdyR181lZSZHhUP'), 2)), N'Dr. Saman Mohammad', 2),
+    (N'mr.jafar', LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', N'zVmgdH7Lv0gQrzgESW'), 2)), N'Mr. Jafar Majidpoor', 3),
+    (N'mr.awder', LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', N'pZZOIjldVUjZ8l1vV0'), 2)), N'Mr. Awder Sardar', 4),
+    (N'mrs.sakar', LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', N'DftGKz3DUpLkF5rxdY'), 2)), N'Mrs. Sakar Omar', 5);
+GO
+
+INSERT INTO dbo.Students (StudentCode, FullName, Email, ProfilePhotoUrl)
+VALUES
+    (N'S001', N'Redeen Sirwan', N'redeen.611224020@uor.edu.krd', NULL),
+    (N'S002', N'Rebin Hussain', N'rebin.611224019@uor.edu.krd', NULL),
+    (N'S003', N'Drwd Samal', N'drwd.611224013@uor.edu.krd', NULL),
+    (N'S004', N'Arsh Khasraw', N'arsh.611224002@uor.edu.krd', NULL),
+    (N'S005', N'Abdulla Sleman', N'abdulla.611224030@uor.edu.krd', NULL);
+GO
+
+INSERT INTO dbo.Enrollments
+    (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade, AssignmentGrade, MidtermGrade, FinalExamGrade, HoursAbsentTotal)
+SELECT
+    s.StudentID,
+    c.CourseID,
+    CAST(ROUND(4.0 + (ABS(CHECKSUM(NEWID())) % 56) / 10.0, 2) AS DECIMAL(5,2)) AS Quiz1,
+    CAST(ROUND(4.0 + (ABS(CHECKSUM(NEWID())) % 56) / 10.0, 2) AS DECIMAL(5,2)) AS Quiz2,
+    CAST(ROUND(8.0 + (ABS(CHECKSUM(NEWID())) % 66) / 10.0, 2) AS DECIMAL(5,2)) AS ProjectGrade,
+    CAST(ROUND(4.0 + (ABS(CHECKSUM(NEWID())) % 56) / 10.0, 2) AS DECIMAL(5,2)) AS AssignmentGrade,
+    CAST(ROUND(12.0 + (ABS(CHECKSUM(NEWID())) % 121) / 10.0, 2) AS DECIMAL(5,2)) AS MidtermGrade,
+    CAST(ROUND(28.0 + (ABS(CHECKSUM(NEWID())) % 201) / 10.0, 2) AS DECIMAL(5,2)) AS FinalExamGrade,
+    CAST(ROUND((ABS(CHECKSUM(NEWID())) % 21) / 10.0, 2) AS DECIMAL(8,2)) AS HoursAbsentTotal
+FROM dbo.Students s
+CROSS JOIN dbo.Courses c;
 GO
