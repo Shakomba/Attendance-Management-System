@@ -30,37 +30,43 @@ export function LoginPage({ apiBase, onLogin }) {
     }
 
     return (
-        <div className="min-h-screen bg-bg flex items-center justify-center p-4 font-sans">
+        <div className="min-h-screen bg-bg flex items-center justify-center p-4">
             <div className="w-full max-w-sm">
+
+                {/* Brand */}
                 <div className="text-center mb-8">
-                    <div className="flex items-center justify-center gap-2.5 mb-3">
-                        <UserCheck size={28} className="text-fg" />
-                        <h1 className="font-mono font-bold text-2xl tracking-tight text-fg">
-                            Attendance
-                        </h1>
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-primary mb-4">
+                        <UserCheck size={28} className="text-primary-fg" />
                     </div>
+                    <h1 className="font-display font-bold text-2xl text-fg tracking-tight">
+                        AttendanceAI
+                    </h1>
+                    <p className="text-sm text-secondary mt-1">Sign in to your professor account</p>
                 </div>
 
+                {/* Card */}
                 <form
                     onSubmit={handleSubmit}
-                    className="bg-surface border border-border rounded-sm shadow-sm p-6 space-y-5"
+                    className="bg-card border border-border shadow-sm p-6 space-y-4"
                 >
                     {error && (
-                        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-sm px-3 py-2.5">
+                        <div className="flex items-start gap-2.5 text-sm text-fg bg-surface border border-border px-3 py-2.5">
+                            <span className="mt-0.5 shrink-0 text-secondary">!</span>
                             {error}
                         </div>
                     )}
 
                     <div>
-                        <label className="block text-sm font-medium text-fg mb-1.5">
+                        <label className="block text-sm font-medium text-fg mb-1.5" htmlFor="login-username">
                             Username
                         </label>
                         <input
+                            id="login-username"
                             type="text"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             className="ui-input w-full"
-                            placeholder="Enter your username"
+                            placeholder="e.g. dr.ahmed"
                             required
                             autoFocus
                             autoComplete="username"
@@ -68,11 +74,12 @@ export function LoginPage({ apiBase, onLogin }) {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-fg mb-1.5">
+                        <label className="block text-sm font-medium text-fg mb-1.5" htmlFor="login-password">
                             Password
                         </label>
                         <div className="relative">
                             <input
+                                id="login-password"
                                 type={showPassword ? 'text' : 'password'}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
@@ -84,8 +91,9 @@ export function LoginPage({ apiBase, onLogin }) {
                             <button
                                 type="button"
                                 onClick={() => setShowPassword((v) => !v)}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors cursor-pointer"
                                 tabIndex={-1}
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
                             >
                                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                             </button>
@@ -95,9 +103,9 @@ export function LoginPage({ apiBase, onLogin }) {
                     <button
                         type="submit"
                         disabled={loading || !username || !password}
-                        className="btn-primary w-full h-10"
+                        className="btn-primary w-full h-10 mt-1"
                     >
-                        {loading ? 'Signing in\u2026' : 'Sign In'}
+                        {loading ? 'Signing in…' : 'Sign In'}
                     </button>
                 </form>
             </div>
