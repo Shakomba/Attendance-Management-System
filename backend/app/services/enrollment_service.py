@@ -23,6 +23,38 @@ POSE_INSTRUCTIONS: Dict[str, str] = {
     "down": "Tilt your head DOWN slightly",
 }
 
+# Required head pose angle ranges per instruction (GPU mode only, InsightFace convention).
+# pitch: positive = looking down, negative = looking up
+# yaw: positive = subject turns right (right cheek visible), negative = subject turns left
+# A flat photo held in front of the camera reports near-zero yaw/pitch regardless of camera angle.
+_POSE_ANGLE_REQUIREMENTS: Dict[str, Dict[str, tuple]] = {
+    "front": {"yaw": (-25.0, 25.0),  "pitch": (-25.0, 25.0)},
+    "left":  {"yaw": (-70.0, -12.0), "pitch": (-35.0, 35.0)},
+    "right": {"yaw": (12.0, 70.0),   "pitch": (-35.0, 35.0)},
+    "up":    {"yaw": (-35.0, 35.0),  "pitch": (-65.0, -12.0)},
+    "down":  {"yaw": (-35.0, 35.0),  "pitch": (12.0, 65.0)},
+}
+
+
+def _pose_angle_ok(pose_tuple: Optional[tuple], instruction: str) -> bool:
+    """Return True if the detected head pose matches the required instruction angle.
+
+    pose_tuple is (pitch, yaw, roll) from InsightFace.  Returns True when pose
+    data is unavailable (CPU mode) so the check is a no-op.
+    """
+    if pose_tuple is None:
+        return True
+    requirements = _POSE_ANGLE_REQUIREMENTS.get(instruction)
+    if not requirements:
+        return True
+    try:
+        pitch, yaw, _roll = pose_tuple
+        yaw_min, yaw_max = requirements["yaw"]
+        pitch_min, pitch_max = requirements["pitch"]
+        return (yaw_min <= yaw <= yaw_max) and (pitch_min <= pitch <= pitch_max)
+    except Exception:
+        return True
+
 
 @dataclass
 class EnrollmentState:
@@ -131,6 +163,18 @@ class EnrollmentService:
             detections,
             key=lambda d: self.face_engine._bbox_area(d.left, d.top, d.right, d.bottom),
         )
+
+        # Validate head pose angle (GPU only — pose is None in CPU mode).
+        if not _pose_angle_ok(target.pose, current_pose):
+            state.pose_consecutive_valid = 0
+            return {
+                "type": "pose_hold",
+                "pose": current_pose,
+                "message": POSE_INSTRUCTIONS.get(current_pose, ""),
+                "frames_remaining": MIN_POSE_HOLD_FRAMES,
+                "progress": state.progress,
+                "total_poses": len(POSES),
+            }
 
         # Run spoof detection on the face crop.
         crop = SpoofDetector.extract_face_crop(

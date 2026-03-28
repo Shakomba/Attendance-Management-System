@@ -32,6 +32,9 @@ class FaceDetection:
     right: int
     bottom: int
     embedding: np.ndarray
+    # Head pose in degrees from InsightFace 3D landmarks (GPU mode only).
+    # Convention: pitch=+down/-up, yaw=+right/-left (subject frame), roll=tilt.
+    pose: Optional[tuple] = None  # (pitch, yaw, roll) or None
 
 
 class FaceEngine:
@@ -128,6 +131,13 @@ class FaceEngine:
 
         for face in faces:
             bbox = face.bbox.astype(int).tolist()
+            pose = None
+            raw_pose = getattr(face, 'pose', None)
+            if raw_pose is not None:
+                try:
+                    pose = tuple(float(v) for v in raw_pose[:3])
+                except Exception:
+                    pose = None
             detections.append(
                 FaceDetection(
                     left=int(bbox[0]),
@@ -135,6 +145,7 @@ class FaceEngine:
                     right=int(bbox[2]),
                     bottom=int(bbox[3]),
                     embedding=np.asarray(face.normed_embedding, dtype=np.float32),
+                    pose=pose,
                 )
             )
 
