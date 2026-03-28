@@ -205,19 +205,32 @@ class EnrollmentService:
                 "total_poses": len(POSES),
             }
 
-        # Hold satisfied — now validate diversity against previously captured poses.
+        # Hold satisfied — check this pose is sufficiently different from the PREVIOUS one.
+        # We compare against the immediately preceding pose (not the global max across all pairs)
+        # so each transition requires a fresh head movement.
         if state.captured_poses:
-            test_poses = {**state.captured_poses, current_pose: embedding}
-            is_diverse, diversity_reason = self.face_engine.validate_pose_diversity(test_poses)
-            if not is_diverse and len(test_poses) >= 2:
-                state.pose_consecutive_valid = 0  # reset so user tries again with more turn
-                return {
-                    "type": "pose_rejected",
-                    "pose": current_pose,
-                    "reason": f"Turn your head a bit more. {diversity_reason}",
-                    "progress": state.progress,
-                    "total_poses": len(POSES),
-                }
+            prev_label = POSES[state.current_pose_index - 1]
+            prev_embedding = state.captured_poses.get(prev_label)
+            if prev_embedding is not None:
+                if self.face_engine.mode == "cpu":
+                    dist = float(np.linalg.norm(embedding - prev_embedding))
+                else:
+                    n1 = embedding / (np.linalg.norm(embedding) + 1e-9)
+                    n2 = prev_embedding / (np.linalg.norm(prev_embedding) + 1e-9)
+                    dist = 1.0 - float(np.dot(n1, n2))
+                threshold = settings.enrollment_pose_distance_threshold
+                if dist < threshold:
+                    state.pose_consecutive_valid = 0
+                    return {
+                        "type": "pose_rejected",
+                        "pose": current_pose,
+                        "reason": (
+                            f"Move your head more — distance {dist:.3f} "
+                            f"(need ≥ {threshold:.3f} from previous pose)."
+                        ),
+                        "progress": state.progress,
+                        "total_poses": len(POSES),
+                    }
 
         # Accept this pose — reset hold counter for the next pose.
         state.pose_consecutive_valid = 0
