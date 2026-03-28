@@ -1,11 +1,12 @@
 import { cn } from '../../lib/utils'
-import { LayoutDashboard, BookOpen, Mail, UserCheck, Sun, Moon, LogOut, User, History } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Mail, UserCheck, ScanFace, Sun, Moon, LogOut, User, History } from 'lucide-react'
 
 const NAV_TABS = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Monitor',  title: 'Live Monitor' },
-    { id: 'gradebook', icon: BookOpen,         label: 'Grades',   title: 'Gradebook' },
-    { id: 'email',     icon: Mail,             label: 'Email',    title: 'Email Students' },
-    { id: 'history',   icon: History,          label: 'History',  title: 'Lecture History' },
+    { id: 'dashboard',  icon: LayoutDashboard, label: 'Monitor',    title: 'Live Monitor' },
+    { id: 'enrollment', icon: ScanFace,        label: 'Enrollment', title: 'Face Enrollment' },
+    { id: 'gradebook',  icon: BookOpen,        label: 'Grades',     title: 'Gradebook' },
+    { id: 'email',      icon: Mail,            label: 'Email',      title: 'Email Students' },
+    { id: 'history',    icon: History,         label: 'History',    title: 'Lecture History' },
 ]
 
 export function DashboardLayout({ children, activeTab, setActiveTab, theme, onToggleTheme, professor, onLogout, headerAction }) {

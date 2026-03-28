@@ -44,45 +44,14 @@ services:
   backend:
     container_name: ams_backend
     restart: unless-stopped
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        ENV PYTHONDONTWRITEBYTECODE=1
-        ENV PYTHONUNBUFFERED=1
-        ENV DEBIAN_FRONTEND=noninteractive
-
-        # Install system dependencies
-        RUN apt-get update && apt-get install -y --no-install-recommends \
-            curl ca-certificates gnupg2 \
-            unixodbc unixodbc-dev \
-            gcc g++ build-essential cmake \
-            libgl1 libglib2.0-0 libgomp1 \
-          && rm -rf /var/lib/apt/lists/*
-
-        # Install MSSQL ODBC driver (Debian 12 / Bookworm)
-        RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-            | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
-          && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
-            > /etc/apt/sources.list.d/mssql-release.list \
-          && apt-get update \
-          && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
-          && rm -rf /var/lib/apt/lists/*
-
-        WORKDIR /app
-        COPY backend/requirements.txt /tmp/requirements.txt
-        RUN pip install --upgrade pip \
-          && pip install --no-cache-dir -r /tmp/requirements.txt
-        COPY backend /app
-
-        EXPOSE 8000
-        CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    runtime: nvidia  # Uncomment after reboot to enable GPU mode
+    image: ams_backend_gpu:latest
     depends_on:
       - sqlserver
     environment:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.shakomba.org,http://localhost:5173,http://localhost:3000}
 
       DEMO_MODE: "true"
       SQL_DRIVER: "ODBC Driver 18 for SQL Server"
@@ -93,12 +62,18 @@ services:
       SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
       SQL_TRUST_SERVER_CERT: "yes"
 
-      AI_MODE: "cpu"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LD_LIBRARY_PATH: "/usr/lib/wsl/lib:/usr/local/cuda/lib64"
+      AI_MODE: "gpu"
       CPU_FACE_DETECT_MODEL: ${CPU_FACE_DETECT_MODEL:-hog}
       CPU_DISTANCE_THRESHOLD: ${CPU_DISTANCE_THRESHOLD:-0.45}
       GPU_COSINE_THRESHOLD: ${GPU_COSINE_THRESHOLD:-0.55}
       RECOGNITION_FRAME_STRIDE: ${RECOGNITION_FRAME_STRIDE:-1}
       RECOGNITION_EVENT_COOLDOWN_SEC: ${RECOGNITION_EVENT_COOLDOWN_SEC:-20}
+      # ArcFace is pose-invariant; same person at different angles ~ 0.05-0.15 cosine dist.
+      # Flat photo = ~0.0 dist. Threshold of 0.03 catches photos while allowing real turns.
+      ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.03"
 
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -111,6 +86,10 @@ services:
       - ./backend/app:/app/app
       - ./student_photos:/app/student_photos
       - ./demo_data:/app/demo_data
+      - insightface_models:/root/.insightface
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    devices:
+      - /dev/dxg
     ports:
       - "${API_PORT_HOST:-8000}:8000"
     healthcheck:
@@ -127,7 +106,7 @@ services:
     build:
       context: .
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.shakomba.org}
+        VITE_API_BASE_URL: https://api.shakomba.org
       dockerfile_inline: |
         FROM node:20-alpine AS build
         WORKDIR /app
@@ -135,7 +114,7 @@ services:
         RUN npm ci --legacy-peer-deps
         COPY frontend/. .
         ARG VITE_API_BASE_URL
-        ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+        ENV VITE_API_BASE_URL=$$VITE_API_BASE_URL
         RUN npm run build
 
         FROM nginx:1.27-alpine
@@ -155,12 +134,13 @@ services:
     depends_on:
       - frontend
       - backend
-    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiMTNkM2Q0NzktZDI5OC00NzIyLThhNTYtZTkxNTIzNjM3M2ZkIiwicyI6Ik5HTm1ZbVpqT0RndE5ESTNZeTAwWWpsakxXSmlOMkl0TnpVeVpHVmlORGRrWXpCayJ9
+    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiMWQ4NmFhNTctNGVhMy00YmM2LWE3ZjYtY2YyNDI0NTg3MzIwIiwicyI6IlFqQ2MrNklUQ3BjN3hTWkx3NFcxOHVtZHYvS2t3OTB3ZzdtSm9YaEJUeTdSTmJRa2duaUZpTnZTc3FNc0g1MjJ3dmJtYlFGUHFza0wzcENTTGF1eVhBPT0ifQ==
     networks:
       - ams_net
 
 volumes:
   mssql_data:
+  insightface_models:
 
 networks:
   ams_net:

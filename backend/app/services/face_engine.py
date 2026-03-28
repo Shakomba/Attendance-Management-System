@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -14,6 +14,15 @@ class MatchResult:
     student_id: int
     full_name: str
     score: float
+
+
+@dataclass
+class MultiMatchResult:
+    student_id: int
+    full_name: str
+    best_score: float  # best match confidence (same scale as MatchResult.score)
+    score_variance: float  # variance across pose matches — low = suspicious
+    is_suspicious: bool  # True if variance too low (possible photo spoof)
 
 
 @dataclass
@@ -186,3 +195,144 @@ class FaceEngine:
             return None
 
         return MatchResult(student_id=best_id, full_name=best_name, score=best_score)
+
+    def match_embedding_multi(
+        self,
+        candidate: np.ndarray,
+        known_faces_grouped: Dict[int, List[Dict]],
+    ) -> Optional[MultiMatchResult]:
+        """Match a candidate embedding against grouped multi-pose embeddings.
+
+        known_faces_grouped: {student_id: [{"embedding": np.ndarray, "full_name": str, "pose_label": str}, ...]}
+
+        Returns the best-matching student with score variance across poses.
+        A real face matches the front embedding well but side poses less well (high variance).
+        A photo matches all poses almost equally (low variance = suspicious).
+        """
+        if not known_faces_grouped:
+            return None
+
+        # Minimum variance to consider "natural" — below this is suspicious.
+        variance_threshold = 0.001 if self.mode == "cpu" else 0.0005
+
+        best_student_id: Optional[int] = None
+        best_full_name: str = ""
+        best_overall_score: float
+        best_variance: float = 0.0
+
+        if self.mode == "cpu":
+            best_overall_score = float("inf")
+            for student_id, poses in known_faces_grouped.items():
+                scores = []
+                for pose in poses:
+                    distance = float(np.linalg.norm(candidate - pose["embedding"]))
+                    scores.append(distance)
+
+                best_dist = min(scores)
+                if best_dist < best_overall_score:
+                    best_overall_score = best_dist
+                    best_student_id = student_id
+                    best_full_name = poses[0]["full_name"]
+                    best_variance = float(np.var(scores)) if len(scores) > 1 else 0.0
+
+            if best_student_id is None or best_overall_score > self.distance_threshold:
+                return None
+
+            confidence = max(0.0, 1.0 - best_overall_score)
+            return MultiMatchResult(
+                student_id=best_student_id,
+                full_name=best_full_name,
+                best_score=confidence,
+                score_variance=best_variance,
+                is_suspicious=best_variance < variance_threshold and len(known_faces_grouped.get(best_student_id, [])) > 1,
+            )
+
+        # GPU: cosine similarity (higher = better)
+        best_overall_score = -1.0
+        candidate_norm = candidate / (np.linalg.norm(candidate) + 1e-9)
+
+        for student_id, poses in known_faces_grouped.items():
+            scores = []
+            for pose in poses:
+                known_norm = pose["embedding"] / (np.linalg.norm(pose["embedding"]) + 1e-9)
+                similarity = float(np.dot(candidate_norm, known_norm))
+                scores.append(similarity)
+
+            best_sim = max(scores)
+            if best_sim > best_overall_score:
+                best_overall_score = best_sim
+                best_student_id = student_id
+                best_full_name = poses[0]["full_name"]
+                best_variance = float(np.var(scores)) if len(scores) > 1 else 0.0
+
+        if best_student_id is None or best_overall_score < self.similarity_threshold:
+            return None
+
+        return MultiMatchResult(
+            student_id=best_student_id,
+            full_name=best_full_name,
+            best_score=best_overall_score,
+            score_variance=best_variance,
+            is_suspicious=best_variance < variance_threshold and len(known_faces_grouped.get(best_student_id, [])) > 1,
+        )
+
+    def validate_pose_diversity(self, embeddings: Dict[str, np.ndarray]) -> Tuple[bool, str]:
+        """Validate that captured pose embeddings are sufficiently diverse.
+
+        Used during enrollment to ensure the subject is a real 3D face.
+        A flat photo produces nearly identical embeddings regardless of
+        the "angle" it's shown at, so pairwise distances will be very small.
+
+        Returns (is_valid, reason).
+        """
+        if len(embeddings) < 2:
+            return True, ""
+
+        threshold = settings.enrollment_pose_distance_threshold
+        labels = list(embeddings.keys())
+        vectors = [embeddings[label] for label in labels]
+
+        max_distance = 0.0
+        pair_distances = []
+
+        for i in range(len(vectors)):
+            for j in range(i + 1, len(vectors)):
+                if self.mode == "cpu":
+                    dist = float(np.linalg.norm(vectors[i] - vectors[j]))
+                else:
+                    # Cosine distance = 1 - cosine_similarity
+                    norm_i = vectors[i] / (np.linalg.norm(vectors[i]) + 1e-9)
+                    norm_j = vectors[j] / (np.linalg.norm(vectors[j]) + 1e-9)
+                    dist = 1.0 - float(np.dot(norm_i, norm_j))
+
+                pair_distances.append((labels[i], labels[j], dist))
+                max_distance = max(max_distance, dist)
+
+        if max_distance < threshold:
+            return False, (
+                f"Insufficient pose variation (max distance {max_distance:.4f} < {threshold}). "
+                f"A real face is required — photos/screens are not accepted."
+            )
+
+        # Check that at least some non-front poses differ meaningfully from front.
+        if "front" in embeddings:
+            front_vec = embeddings["front"]
+            non_front_dists = []
+            for label, vec in embeddings.items():
+                if label == "front":
+                    continue
+                if self.mode == "cpu":
+                    d = float(np.linalg.norm(front_vec - vec))
+                else:
+                    n1 = front_vec / (np.linalg.norm(front_vec) + 1e-9)
+                    n2 = vec / (np.linalg.norm(vec) + 1e-9)
+                    d = 1.0 - float(np.dot(n1, n2))
+                non_front_dists.append(d)
+
+            if non_front_dists and max(non_front_dists) < threshold:
+                return False, (
+                    f"Non-front poses too similar to front (max {max(non_front_dists):.4f}). "
+                    f"Please turn your head as instructed."
+                )
+
+        return True, ""

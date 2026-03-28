@@ -84,3 +84,17 @@ class BulkEmailResponse(BaseModel):
     sent: int
     failed: int
     results: List[Dict[str, Any]]
+
+
+class EnrollmentStartResponse(BaseModel):
+    student_id: int
+    current_pose: str
+    message: str
+    total_poses: int
+
+
+class EnrollmentStatusResponse(BaseModel):
+    student_id: int
+    enrollment_status: str  # 'pending' or 'enrolled'
+    captured_poses: List[str]
+    remaining_poses: List[str]

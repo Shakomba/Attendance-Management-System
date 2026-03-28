@@ -43,6 +43,17 @@ class Settings:
     recognition_frame_stride: int = int(os.getenv("RECOGNITION_FRAME_STRIDE", "8"))
     recognition_event_cooldown_sec: int = int(os.getenv("RECOGNITION_EVENT_COOLDOWN_SEC", "20"))
 
+    # Anti-spoofing
+    antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "true"), True)
+    antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "15.0"))
+    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.25"))
+    antispoof_frequency_threshold: float = float(os.getenv("ANTISPOOF_FREQUENCY_THRESHOLD", "0.3"))
+    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.5"))
+
+    # Enrollment
+    enrollment_pose_distance_threshold: float = float(os.getenv("ENROLLMENT_POSE_DISTANCE_THRESHOLD", "0.15"))
+    enrollment_required_poses: int = int(os.getenv("ENROLLMENT_REQUIRED_POSES", "5"))
+
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
     smtp_user: str = os.getenv("SMTP_USER", "")
