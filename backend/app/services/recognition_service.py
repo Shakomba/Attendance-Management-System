@@ -10,7 +10,7 @@ import numpy as np
 
 from ..config import settings
 from .face_engine import FaceEngine
-from .spoof_detector import SpoofDetector
+from .silent_face_detector import SilentFaceDetector
 
 
 @dataclass
@@ -55,7 +55,7 @@ _POSE_MATCH_MARGIN = 0.0
 
 
 class RecognitionService:
-    def __init__(self, repository: Any, face_engine: FaceEngine, spoof_detector: Optional[SpoofDetector] = None) -> None:
+    def __init__(self, repository: Any, face_engine: FaceEngine, spoof_detector: Optional[SilentFaceDetector] = None) -> None:
         self.repository = repository
         self.face_engine = face_engine
         self.spoof_detector = spoof_detector
@@ -223,36 +223,34 @@ class RecognitionService:
                 if session_start is not None else 0
             )
 
-            # ── Step 1: Texture-based spoof detection ──────────────────
+            # ── Step 1: Neural-network liveness check ──────────────────
             if self.spoof_detector and self.spoof_detector.enabled:
-                crop = SpoofDetector.extract_face_crop(
+                is_live, liveness_conf = self.spoof_detector.is_live(
                     frame_bgr, detection.left, detection.top, detection.right, detection.bottom,
                 )
-                if crop is not None:
-                    spoof_result = self.spoof_detector.analyze(crop)
-                    if not spoof_result.is_live:
-                        output.overlays.append(
-                            FaceOverlay(
-                                event_type="spoof",
-                                student_id=None,
-                                full_name="Spoof Detected",
-                                confidence=spoof_result.confidence,
-                                left=detection.left,
-                                top=detection.top,
-                                right=detection.right,
-                                bottom=detection.bottom,
-                                engine_mode=self.face_engine.mode,
-                            )
-                        )
-                        self.repository.add_recognition_event(
-                            session_id=session_id,
+                if not is_live:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="spoof",
                             student_id=None,
-                            confidence=None,
+                            full_name="Spoof Detected",
+                            confidence=liveness_conf,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
                             engine_mode=self.face_engine.mode,
-                            notes=f"spoof-rejected:{spoof_result.reason}",
-                            recognized_at=event_time_db,
                         )
-                        continue
+                    )
+                    self.repository.add_recognition_event(
+                        session_id=session_id,
+                        student_id=None,
+                        confidence=None,
+                        engine_mode=self.face_engine.mode,
+                        notes=f"spoof-rejected:minifasnet(conf={liveness_conf:.2f})",
+                        recognized_at=event_time_db,
+                    )
+                    continue
 
             # ── Step 2: Multi-embedding matching ───────────────────────
             match = None

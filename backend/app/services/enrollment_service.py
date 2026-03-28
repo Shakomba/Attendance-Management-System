@@ -8,7 +8,7 @@ import numpy as np
 
 from ..config import settings
 from .face_engine import FaceEngine
-from .spoof_detector import SpoofDetector
+from .silent_face_detector import SilentFaceDetector
 
 POSES: List[str] = ["front", "left", "right", "up", "down"]
 
@@ -83,7 +83,7 @@ class EnrollmentService:
     def __init__(
         self,
         face_engine: FaceEngine,
-        spoof_detector: SpoofDetector,
+        spoof_detector: SilentFaceDetector,
         repository: Any,
     ) -> None:
         self.face_engine = face_engine
@@ -173,21 +173,19 @@ class EnrollmentService:
                 "total_poses": len(POSES),
             }
 
-        # Run spoof detection on the face crop.
-        crop = SpoofDetector.extract_face_crop(
+        # Run neural-network liveness check on the full frame + bbox.
+        is_live, liveness_confidence = self.spoof_detector.is_live(
             frame_bgr, target.left, target.top, target.right, target.bottom,
         )
-        if crop is not None:
-            spoof_result = self.spoof_detector.analyze(crop)
-            if not spoof_result.is_live:
-                state.pose_consecutive_valid = 0  # reset hold counter
-                return {
-                    "type": "spoof_detected",
-                    "pose": current_pose,
-                    "reason": f"Flat image detected ({spoof_result.reason}). Please use your real face.",
-                    "progress": state.progress,
-                    "total_poses": len(POSES),
-                }
+        if not is_live:
+            state.pose_consecutive_valid = 0  # reset hold counter
+            return {
+                "type": "spoof_detected",
+                "pose": current_pose,
+                "reason": f"Flat image detected (confidence={liveness_confidence:.2f}). Please use your real face.",
+                "progress": state.progress,
+                "total_poses": len(POSES),
+            }
 
         embedding = target.embedding
 

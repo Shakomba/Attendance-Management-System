@@ -36,7 +36,7 @@ from .services.email_service import EmailService
 from .services.enrollment_service import EnrollmentService
 from .services.face_engine import FaceEngine
 from .services.recognition_service import RecognitionService
-from .services.spoof_detector import SpoofDetector
+from .services.silent_face_detector import SilentFaceDetector
 from .websocket_manager import WebSocketManager
 
 # ---------------------------------------------------------------------------
@@ -54,13 +54,13 @@ email_service = EmailService(repo)
 
 face_engine_error: Optional[str] = None
 face_engine: Optional[FaceEngine] = None
-spoof_detector: Optional[SpoofDetector] = None
+spoof_detector: Optional[SilentFaceDetector] = None
 recognition_service: Optional[RecognitionService] = None
 enrollment_service: Optional[EnrollmentService] = None
 
 try:
     face_engine = FaceEngine()
-    spoof_detector = SpoofDetector()
+    spoof_detector = SilentFaceDetector()
     recognition_service = RecognitionService(repo, face_engine, spoof_detector)
     enrollment_service = EnrollmentService(face_engine, spoof_detector, repo)
 except Exception as exc:  # pragma: no cover

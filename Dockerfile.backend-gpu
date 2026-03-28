@@ -13,3 +13,13 @@ COPY --from=cuda-provider /usr/lib/x86_64-linux-gnu/libcudnn*.so* /usr/local/cud
 RUN echo '/usr/lib/wsl/lib' > /etc/ld.so.conf.d/wsl-cuda.conf
 
 ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:/usr/local/cuda/lib64
+
+# Install PyTorch (CPU build — inference on 80×80 patches is fast on CPU)
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download MiniFASNet liveness models so they are baked into the image
+RUN mkdir -p /app/silent_face_models && \
+    wget -q -O /app/silent_face_models/2.7_80x80_MiniFASNetV2.pth \
+      "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth" && \
+    wget -q -O /app/silent_face_models/4_0_0_80x80_MiniFASNetV1SE.pth \
+      "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth"
