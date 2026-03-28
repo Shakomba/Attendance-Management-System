@@ -51,9 +51,8 @@ class AntiSpoofPredict:
         Returns softmax probabilities array of shape (1, num_classes).
         Index 1 = real face probability.
         """
-        # Convert BGR uint8 HWC → float32 CHW in [0, 1]
-        img_rgb = img[:, :, ::-1].copy()  # BGR → RGB
-        img_float = img_rgb.astype(np.float32) / 255.0
+        # Models were trained on BGR images (OpenCV convention) — do NOT convert to RGB.
+        img_float = img.astype(np.float32) / 255.0
         tensor = torch.from_numpy(img_float.transpose(2, 0, 1)).unsqueeze(0).to(self.device)
 
         model = self._load_model(model_path)
