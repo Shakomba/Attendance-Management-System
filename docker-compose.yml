@@ -72,8 +72,8 @@ services:
       RECOGNITION_FRAME_STRIDE: ${RECOGNITION_FRAME_STRIDE:-1}
       RECOGNITION_EVENT_COOLDOWN_SEC: ${RECOGNITION_EVENT_COOLDOWN_SEC:-20}
       # ArcFace is pose-invariant; same person at different angles ~ 0.05-0.15 cosine dist.
-      # Flat photo = ~0.0 dist. Threshold of 0.03 catches photos while allowing real turns.
-      ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.03"
+      # Flat photo = ~0.0 dist. Threshold of 0.06 catches photos while allowing moderate turns.
+      ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.06"
 
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}

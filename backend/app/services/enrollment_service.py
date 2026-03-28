@@ -12,8 +12,8 @@ from .spoof_detector import SpoofDetector
 
 POSES: List[str] = ["front", "left", "right", "up", "down"]
 
-# Number of consecutive valid frames required before a pose is accepted (~1.5 s at effective 2 fps).
-MIN_POSE_HOLD_FRAMES: int = 3
+# Number of consecutive valid frames required before a pose is accepted.
+MIN_POSE_HOLD_FRAMES: int = 2
 
 POSE_INSTRUCTIONS: Dict[str, str] = {
     "front": "Look straight at the camera",
@@ -23,37 +23,34 @@ POSE_INSTRUCTIONS: Dict[str, str] = {
     "down": "Tilt your head DOWN slightly",
 }
 
-# Required head pose angle ranges per instruction (GPU mode only, InsightFace convention).
-# pitch: positive = looking down, negative = looking up
-# yaw: positive = subject turns right (right cheek visible), negative = subject turns left
-# A flat photo held in front of the camera reports near-zero yaw/pitch regardless of camera angle.
-_POSE_ANGLE_REQUIREMENTS: Dict[str, Dict[str, tuple]] = {
-    "front": {"yaw": (-25.0, 25.0),  "pitch": (-25.0, 25.0)},
-    "left":  {"yaw": (-70.0, -12.0), "pitch": (-35.0, 35.0)},
-    "right": {"yaw": (12.0, 70.0),   "pitch": (-35.0, 35.0)},
-    "up":    {"yaw": (-35.0, 35.0),  "pitch": (-65.0, -12.0)},
-    "down":  {"yaw": (-35.0, 35.0),  "pitch": (12.0, 65.0)},
-}
+# Minimum absolute angle (degrees) required to confirm head has actually moved.
+# Uses magnitude only — no assumed sign convention for left/right.
+# A flat photo reports ~0° on all axes regardless of how it's angled at the camera.
+_POSE_MIN_YAW: float = 10.0   # left / right poses must have |yaw|  >= this
+_POSE_MIN_PITCH: float = 8.0  # up   / down  poses must have |pitch| >= this
+_POSE_MAX_FRONT: float = 22.0 # front pose must have |yaw| AND |pitch| <= this
 
 
 def _pose_angle_ok(pose_tuple: Optional[tuple], instruction: str) -> bool:
     """Return True if the detected head pose matches the required instruction angle.
 
-    pose_tuple is (pitch, yaw, roll) from InsightFace.  Returns True when pose
-    data is unavailable (CPU mode) so the check is a no-op.
+    Uses absolute (magnitude) checks so the result is independent of InsightFace's
+    sign convention.  Returns True when pose data is unavailable (CPU mode).
     """
     if pose_tuple is None:
         return True
-    requirements = _POSE_ANGLE_REQUIREMENTS.get(instruction)
-    if not requirements:
-        return True
     try:
         pitch, yaw, _roll = pose_tuple
-        yaw_min, yaw_max = requirements["yaw"]
-        pitch_min, pitch_max = requirements["pitch"]
-        return (yaw_min <= yaw <= yaw_max) and (pitch_min <= pitch <= pitch_max)
+        abs_yaw, abs_pitch = abs(yaw), abs(pitch)
+        if instruction == "front":
+            return abs_yaw <= _POSE_MAX_FRONT and abs_pitch <= _POSE_MAX_FRONT
+        if instruction in ("left", "right"):
+            return abs_yaw >= _POSE_MIN_YAW
+        if instruction in ("up", "down"):
+            return abs_pitch >= _POSE_MIN_PITCH
     except Exception:
-        return True
+        pass
+    return True
 
 
 @dataclass
@@ -194,22 +191,8 @@ class EnrollmentService:
 
         embedding = target.embedding
 
-        # Validate diversity against previously captured poses.
-        if state.captured_poses:
-            test_poses = {**state.captured_poses, current_pose: embedding}
-            is_diverse, diversity_reason = self.face_engine.validate_pose_diversity(test_poses)
-            # Only enforce diversity after we have front + at least one other pose.
-            if not is_diverse and len(test_poses) >= 2:
-                state.pose_consecutive_valid = 0  # reset hold counter
-                return {
-                    "type": "pose_rejected",
-                    "pose": current_pose,
-                    "reason": f"Pose too similar to previous captures. {diversity_reason}",
-                    "progress": state.progress,
-                    "total_poses": len(POSES),
-                }
-
-        # Require the user to hold the pose for MIN_POSE_HOLD_FRAMES consecutive valid frames.
+        # Accumulate hold counter — diversity is checked only after the hold is satisfied
+        # so that the counter never resets while the user is moving into position.
         state.pose_consecutive_valid += 1
         if state.pose_consecutive_valid < MIN_POSE_HOLD_FRAMES:
             frames_left = MIN_POSE_HOLD_FRAMES - state.pose_consecutive_valid
@@ -221,6 +204,20 @@ class EnrollmentService:
                 "progress": state.progress,
                 "total_poses": len(POSES),
             }
+
+        # Hold satisfied — now validate diversity against previously captured poses.
+        if state.captured_poses:
+            test_poses = {**state.captured_poses, current_pose: embedding}
+            is_diverse, diversity_reason = self.face_engine.validate_pose_diversity(test_poses)
+            if not is_diverse and len(test_poses) >= 2:
+                state.pose_consecutive_valid = 0  # reset so user tries again with more turn
+                return {
+                    "type": "pose_rejected",
+                    "pose": current_pose,
+                    "reason": f"Turn your head a bit more. {diversity_reason}",
+                    "progress": state.progress,
+                    "total_poses": len(POSES),
+                }
 
         # Accept this pose — reset hold counter for the next pose.
         state.pose_consecutive_valid = 0
