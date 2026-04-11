@@ -5,6 +5,7 @@ import { useSession } from "./hooks/useSession";
 import { useCamera } from "./hooks/useCamera";
 import { useDashboardSocket } from "./hooks/useDashboardSocket";
 import { useEmail } from "./hooks/useEmail";
+import { useEnrollment } from "./hooks/useEnrollment";
 
 import { LoginPage } from "./components/LoginPage";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
@@ -14,6 +15,8 @@ import { AttendanceTable } from "./components/dashboard/AttendanceTable";
 import { GradebookTable } from "./components/dashboard/GradebookTable";
 import { EmailPanel } from "./components/dashboard/EmailPanel";
 import { SessionHistory } from "./components/dashboard/SessionHistory";
+import { EnrollmentModal } from "./components/enrollment/EnrollmentModal";
+import { EnrollmentTab } from "./components/enrollment/EnrollmentTab";
 
 // Cover: scale to fill the target, cropping the overflow (no black bars)
 function coverRect(sourceW, sourceH, targetW, targetH) {
@@ -121,6 +124,26 @@ export default function App() {
 
   const { sending: emailSending, sendBulkEmail, clearResult: clearEmailResult } = useEmail(apiFetch);
 
+  const enrollment = useEnrollment(apiBase);
+  const [enrollmentTarget, setEnrollmentTarget] = useState(null); // { studentId, fullName }
+
+  const openEnrollment = useCallback((studentId, fullName) => {
+    setEnrollmentTarget({ studentId, fullName });
+  }, []);
+
+  const closeEnrollment = useCallback(() => {
+    enrollment.stopEnrollment();
+    enrollment.setComplete(false);
+    enrollment.setError(null);
+    setEnrollmentTarget(null);
+  }, [enrollment]);
+
+  const handleStartEnrollment = useCallback(() => {
+    if (enrollmentTarget) {
+      enrollment.startEnrollment(enrollmentTarget.studentId);
+    }
+  }, [enrollment, enrollmentTarget]);
+
   // Local State
   const [gradeEditor, setGradeEditor] = useState(null);
   const [gradeBusyByStudent, setGradeBusyByStudent] = useState({});
@@ -180,21 +203,24 @@ export default function App() {
     }
   }, [professor, setCourseId]);
 
-  // Bootstrap & Polling
+  // Bootstrap & Polling — only run when authenticated
   useEffect(() => {
+    if (!professor) return;
     loadBootstrap();
-  }, [loadBootstrap]);
+  }, [professor, loadBootstrap]);
   useEffect(() => {
+    if (!professor) return;
     if (courseId) loadGradebook();
-  }, [courseId, loadGradebook]);
+  }, [professor, courseId, loadGradebook]);
   useEffect(() => {
+    if (!professor) return;
     const timer = setInterval(() => {
       loadBootstrap({ silent: true });
       if (courseId) loadGradebook();
       if (sessionId) refreshAttendance();
     }, 15000);
     return () => clearInterval(timer);
-  }, [courseId, loadBootstrap, loadGradebook, refreshAttendance, sessionId]);
+  }, [professor, courseId, loadBootstrap, loadGradebook, refreshAttendance, sessionId]);
 
   // Events
   const appendEvent = useCallback((level, message, details = null) => {
@@ -250,11 +276,17 @@ export default function App() {
       const height = Math.max(1, bottom - top);
 
       const recognized = face.event_type === "recognized";
+      const isSpoof = face.event_type === "spoof";
+      const isVerifying = face.event_type === "verifying";
       const absentHours = Number(face.session_absent_hours ?? 0);
       const isLate = recognized && absentHours > 0;
 
       let label;
-      if (!recognized) {
+      if (isSpoof) {
+        label = face.full_name || "SPOOF DETECTED";
+      } else if (isVerifying) {
+        label = face.full_name || "Verifying...";
+      } else if (!recognized) {
         label = "Unknown";
       } else if (isLate) {
         label = `${face.full_name || "Student"} — Late (${absentHours}h absent)`;
@@ -263,7 +295,11 @@ export default function App() {
       }
 
       let strokeColor;
-      if (!recognized) {
+      if (isSpoof) {
+        strokeColor = "#dc2626"; // spoof → red-600
+      } else if (isVerifying) {
+        strokeColor = "#3b82f6"; // verifying → blue-500
+      } else if (!recognized) {
         strokeColor = "#f59e0b"; // unknown → amber
       } else if (isLate) {
         strokeColor = "#ef4444"; // late arrival → red
@@ -277,9 +313,27 @@ export default function App() {
       }
 
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = isSpoof ? 3 : 2;
       ctx.lineJoin = "round";
       ctx.strokeRect(left, top, width, height);
+
+      // Diagonal stripes for spoof detections.
+      if (isSpoof) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, width, height);
+        ctx.clip();
+        ctx.strokeStyle = "rgba(220,38,38,0.3)";
+        ctx.lineWidth = 1;
+        const step = 12;
+        for (let d = -height; d < width; d += step) {
+          ctx.beginPath();
+          ctx.moveTo(left + d, top);
+          ctx.lineTo(left + d + height, top + height);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       ctx.font = '500 12px "Inter", sans-serif';
       const textWidth = ctx.measureText(label).width;
@@ -587,6 +641,14 @@ export default function App() {
             </div>
           </div>
         </div>
+      ) : activeTab === 'enrollment' ? (
+        <div className="animate-in fade-in duration-300">
+          <EnrollmentTab
+            apiFetch={apiFetch}
+            courseId={courseId}
+            onEnrollStudent={openEnrollment}
+          />
+        </div>
       ) : activeTab === 'gradebook' ? (
         <div className="animate-in fade-in duration-300">
           <div className="mt-2">
@@ -630,6 +692,25 @@ export default function App() {
       ) : null}
       <video ref={videoWorkerRef} style={{ display: "none" }} playsInline />
       <canvas ref={captureCanvasRef} style={{ display: "none" }} />
+
+      {enrollmentTarget && (
+        <EnrollmentModal
+          studentName={enrollmentTarget.fullName}
+          enrolling={enrollment.enrolling}
+          currentPose={enrollment.currentPose}
+          poseMessage={enrollment.poseMessage}
+          progress={enrollment.progress}
+          totalPoses={enrollment.totalPoses}
+          error={enrollment.error}
+          complete={enrollment.complete}
+          rejected={enrollment.rejected}
+          onStart={handleStartEnrollment}
+          onStop={enrollment.stopEnrollment}
+          onClose={closeEnrollment}
+          videoRef={enrollment.videoRef}
+          canvasRef={enrollment.canvasRef}
+        />
+      )}
     </DashboardLayout>
   );
 }

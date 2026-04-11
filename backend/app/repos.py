@@ -105,24 +105,26 @@ class Repository:
         }
 
     @staticmethod
-    def upsert_face_embedding(student_id: int, model_name: str, embedding_data: bytes) -> None:
+    def upsert_face_embedding(
+        student_id: int, model_name: str, embedding_data: bytes, pose_label: str = "front",
+    ) -> None:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 UPDATE dbo.StudentFaceEmbeddings
                 SET IsPrimary = 0
-                WHERE StudentID = ? AND ModelName = ?;
+                WHERE StudentID = ? AND ModelName = ? AND PoseLabel = ?;
                 """,
-                (student_id, model_name),
+                (student_id, model_name, pose_label),
             )
 
             cursor.execute(
                 """
-                INSERT INTO dbo.StudentFaceEmbeddings (StudentID, ModelName, EmbeddingData, IsPrimary)
-                VALUES (?, ?, ?, 1);
+                INSERT INTO dbo.StudentFaceEmbeddings (StudentID, ModelName, EmbeddingData, IsPrimary, PoseLabel)
+                VALUES (?, ?, ?, 1, ?);
                 """,
-                (student_id, model_name, embedding_data),
+                (student_id, model_name, embedding_data, pose_label),
             )
 
             conn.commit()
@@ -135,7 +137,8 @@ class Repository:
                 s.StudentID,
                 s.FullName,
                 sfe.ModelName,
-                sfe.EmbeddingData
+                sfe.EmbeddingData,
+                sfe.PoseLabel
             FROM dbo.Enrollments e
             INNER JOIN dbo.Students s
                 ON s.StudentID = e.StudentID
@@ -147,6 +150,38 @@ class Repository:
               AND s.IsActive = 1;
             """,
             (model_name, course_id),
+        )
+
+    @staticmethod
+    def mark_student_enrolled(student_id: int) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE dbo.Students SET EnrollmentStatus = N'enrolled' WHERE StudentID = ?;",
+                (student_id,),
+            )
+            conn.commit()
+
+    @staticmethod
+    def get_student_enrollment_status(student_id: int) -> str:
+        row = fetch_one(
+            "SELECT EnrollmentStatus FROM dbo.Students WHERE StudentID = ?;",
+            (student_id,),
+        )
+        return str(row["EnrollmentStatus"]) if row else "pending"
+
+    @staticmethod
+    def list_course_students(course_id: int) -> List[Dict[str, Any]]:
+        return fetch_all(
+            """
+            SELECT s.StudentID, s.StudentCode, s.FullName, s.Email,
+                   ISNULL(s.EnrollmentStatus, N'pending') AS EnrollmentStatus
+            FROM dbo.Students s
+            INNER JOIN dbo.Enrollments e ON e.StudentID = s.StudentID
+            WHERE e.CourseID = ? AND s.IsActive = 1
+            ORDER BY s.FullName;
+            """,
+            (course_id,),
         )
 
     @staticmethod

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose:*)",
+      "mcp__do-droplets__size-list",
+      "mcp__do-accounts__key-list",
+      "mcp__do-droplets__image-list",
+      "Bash(chmod +x /home/Shakomba/Projects/Attendance-Management-System/deploy.sh)",
+      "mcp__do-droplets__droplet-create",
+      "Bash(ls /home/Shakomba/Projects/Attendance-Management-System/backend/.venv*/)",
+      "Bash(python3 -c \":*)",
+      "Bash(npm run:*)",
+      "Bash(wsl -d Debian -u root bash)"
+    ]
+  }
+}
