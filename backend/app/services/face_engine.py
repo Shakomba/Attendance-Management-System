@@ -76,7 +76,7 @@ class FaceEngine:
                 name="buffalo_l",
                 providers=["CUDAExecutionProvider"],
             )
-            self.face_analysis.prepare(ctx_id=0, det_thresh=0.35, det_size=(960, 960))
+            self.face_analysis.prepare(ctx_id=0, det_thresh=0.55, det_size=(960, 960))
             self.model_name = "insightface-512"
 
     @staticmethod
@@ -176,8 +176,14 @@ class FaceEngine:
         if not faces:
             return detections
 
+        frame_area = frame_bgr.shape[0] * frame_bgr.shape[1]
+        min_face_area = frame_area * 0.03  # ignore detections smaller than 3% of frame
+
         for face in faces:
             bbox = face.bbox.astype(int).tolist()
+            face_area = self._bbox_area(bbox[0], bbox[1], bbox[2], bbox[3])
+            if face_area < min_face_area:
+                continue
             pose = None
             raw_pose = getattr(face, 'pose', None)
             if raw_pose is not None:
