@@ -44,7 +44,7 @@ class Settings:
     recognition_event_cooldown_sec: int = int(os.getenv("RECOGNITION_EVENT_COOLDOWN_SEC", "20"))
 
     # Anti-spoofing
-    antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "true"), True)
+    antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "false"), False)
     # Laplacian variance: real face ~200-800, phone screen ~80-200, print ~30-80.
     # Lowered from 120 — webcam compressed video has naturally lower variance than photos.
     antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "80.0"))
