@@ -99,6 +99,50 @@ class FaceEngine:
         height = max(0, bottom - top)
         return width * height
 
+    @staticmethod
+    def _nms(detections: List[FaceDetection], iou_threshold: float = 0.45) -> List[FaceDetection]:
+        """Remove duplicate detections using non-maximum suppression.
+
+        Keeps the detection with the largest area when two boxes overlap
+        more than iou_threshold.  Runs in O(n²) which is fine for the
+        handful of faces expected per frame.
+        """
+        if len(detections) <= 1:
+            return detections
+
+        # Sort largest area first so we always keep the best-fitting box.
+        ranked = sorted(
+            detections,
+            key=lambda d: FaceEngine._bbox_area(d.left, d.top, d.right, d.bottom),
+            reverse=True,
+        )
+
+        kept: List[FaceDetection] = []
+        for candidate in ranked:
+            cx1, cy1, cx2, cy2 = candidate.left, candidate.top, candidate.right, candidate.bottom
+            suppressed = False
+            for kept_det in kept:
+                kx1, ky1, kx2, ky2 = kept_det.left, kept_det.top, kept_det.right, kept_det.bottom
+                inter_x1 = max(cx1, kx1)
+                inter_y1 = max(cy1, ky1)
+                inter_x2 = min(cx2, kx2)
+                inter_y2 = min(cy2, ky2)
+                inter_w = max(0, inter_x2 - inter_x1)
+                inter_h = max(0, inter_y2 - inter_y1)
+                inter_area = inter_w * inter_h
+                union_area = (
+                    FaceEngine._bbox_area(cx1, cy1, cx2, cy2)
+                    + FaceEngine._bbox_area(kx1, ky1, kx2, ky2)
+                    - inter_area
+                )
+                if union_area > 0 and inter_area / union_area >= iou_threshold:
+                    suppressed = True
+                    break
+            if not suppressed:
+                kept.append(candidate)
+
+        return kept
+
     def detect_faces(self, frame_bgr: np.ndarray) -> List[FaceDetection]:
         detections: List[FaceDetection] = []
 
@@ -122,7 +166,7 @@ class FaceEngine:
                         embedding=np.asarray(encodings[idx], dtype=np.float32),
                     )
                 )
-            return detections
+            return self._nms(detections)
 
         faces = self.face_analysis.get(frame_bgr)
 
@@ -149,7 +193,7 @@ class FaceEngine:
                 )
             )
 
-        return detections
+        return self._nms(detections)
 
     def extract_embedding(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
         detections = self.detect_faces(frame_bgr)
