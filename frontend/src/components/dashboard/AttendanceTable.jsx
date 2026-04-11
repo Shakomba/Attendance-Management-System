@@ -80,7 +80,9 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     <td className="px-3 py-3 sm:px-6 sm:py-4">
                       <div className="flex items-center gap-3">
                         <div>
-                          <div className="font-semibold text-primary">{row.FullName}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-primary">{row.FullName}</span>
+                          </div>
                           {/* Mobile-only: show status + time beneath name */}
                           <div className="flex items-center gap-2 mt-1 sm:hidden">
                             {isLate ? (

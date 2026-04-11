@@ -20,6 +20,8 @@ from .repos import Repository
 from .schemas import (
     BulkEmailRequest,
     BulkEmailResponse,
+    EnrollmentStartResponse,
+    EnrollmentStatusResponse,
     FinalizeSessionResponse,
     GradeUpdateRequest,
     GenericMessage,
@@ -31,8 +33,10 @@ from .schemas import (
     StudentCreateRequest,
 )
 from .services.email_service import EmailService
+from .services.enrollment_service import EnrollmentService
 from .services.face_engine import FaceEngine
 from .services.recognition_service import RecognitionService
+from .services.spoof_detector import SpoofDetector
 from .websocket_manager import WebSocketManager
 
 # ---------------------------------------------------------------------------
@@ -50,11 +54,15 @@ email_service = EmailService(repo)
 
 face_engine_error: Optional[str] = None
 face_engine: Optional[FaceEngine] = None
+spoof_detector: Optional[SpoofDetector] = None
 recognition_service: Optional[RecognitionService] = None
+enrollment_service: Optional[EnrollmentService] = None
 
 try:
     face_engine = FaceEngine()
-    recognition_service = RecognitionService(repo, face_engine)
+    spoof_detector = SpoofDetector()
+    recognition_service = RecognitionService(repo, face_engine, spoof_detector)
+    enrollment_service = EnrollmentService(face_engine, spoof_detector, repo)
 except Exception as exc:  # pragma: no cover
     face_engine_error = str(exc)
 
@@ -183,6 +191,7 @@ def create_student(
 async def upload_student_face(
     student_id: int,
     image: UploadFile = File(...),
+    pose_label: str = Query(default="front"),
     professor: dict = Depends(get_current_professor),
 ) -> GenericMessage:
     if not face_engine:
@@ -190,6 +199,9 @@ async def upload_student_face(
 
     if image.content_type not in _ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are supported.")
+
+    if pose_label not in {"front", "left", "right", "up", "down"}:
+        raise HTTPException(status_code=400, detail="pose_label must be one of: front, left, right, up, down.")
 
     image_bytes = await image.read()
     if len(image_bytes) > _MAX_IMAGE_BYTES:
@@ -203,11 +215,124 @@ async def upload_student_face(
     if embedding is None:
         raise HTTPException(status_code=400, detail="No face detected in uploaded image.")
 
-    repo.upsert_face_embedding(student_id, face_engine.model_name, face_engine.embedding_to_bytes(embedding))
+    repo.upsert_face_embedding(
+        student_id, face_engine.model_name, face_engine.embedding_to_bytes(embedding), pose_label=pose_label,
+    )
     return GenericMessage(
         message="Face embedding saved.",
-        data={"student_id": student_id, "model_name": face_engine.model_name, "ai_mode": face_engine.mode},
+        data={
+            "student_id": student_id,
+            "model_name": face_engine.model_name,
+            "ai_mode": face_engine.mode,
+            "pose_label": pose_label,
+        },
     )
+
+
+# ---------------------------------------------------------------------------
+# Enrollment endpoints (multi-angle anti-spoofing)
+# ---------------------------------------------------------------------------
+@app.post("/api/students/{student_id}/enrollment/start", response_model=EnrollmentStartResponse)
+def start_enrollment(
+    student_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> EnrollmentStartResponse:
+    if not enrollment_service:
+        raise HTTPException(status_code=503, detail=face_engine_error or "Face engine not initialized.")
+    result = enrollment_service.start_enrollment(student_id)
+    return EnrollmentStartResponse(**result)
+
+
+@app.get("/api/students/{student_id}/enrollment/status", response_model=EnrollmentStatusResponse)
+def get_enrollment_status(
+    student_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> EnrollmentStatusResponse:
+    if not enrollment_service:
+        raise HTTPException(status_code=503, detail=face_engine_error or "Face engine not initialized.")
+    result = enrollment_service.get_status(student_id)
+    return EnrollmentStatusResponse(**result)
+
+
+@app.websocket("/ws/enrollment/{student_id}")
+async def enrollment_ws(
+    websocket: WebSocket,
+    student_id: int,
+    token: Optional[str] = Query(default=None),
+) -> None:
+    professor = _validate_ws_token(token)
+    if not professor:
+        await websocket.close(code=4001)
+        return
+
+    if not enrollment_service or not face_engine:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": face_engine_error or "Face engine unavailable."})
+        await websocket.close()
+        return
+
+    await websocket.accept()
+    # Start enrollment flow.
+    start_result = enrollment_service.start_enrollment(student_id)
+    await websocket.send_json({"type": "pose_instruction", **start_result})
+
+    frame_count = 0
+    enrollment_stride = 4  # Process every 4th frame for responsiveness.
+
+    try:
+        while True:
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            # Handle text messages (ping/cancel).
+            if "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    if payload.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
+                    elif payload.get("type") == "cancel":
+                        enrollment_service.cancel_enrollment(student_id)
+                        await websocket.send_json({"type": "cancelled"})
+                        break
+                except Exception:
+                    pass
+                continue
+
+            raw_bytes = message.get("bytes")
+            if not raw_bytes:
+                continue
+
+            frame_count += 1
+            if frame_count % enrollment_stride != 0:
+                continue
+
+            frame = await asyncio.to_thread(face_engine.decode_image_bytes, raw_bytes)
+            if frame is None:
+                continue
+
+            result = await asyncio.to_thread(enrollment_service.process_frame, student_id, frame)
+            await websocket.send_json(result)
+
+            if result.get("type") in ("enrollment_complete", "enrollment_failed"):
+                break
+
+    except WebSocketDisconnect:
+        enrollment_service.cancel_enrollment(student_id)
+    except Exception as _exc:
+        import logging, traceback
+        logging.getLogger("enrollment").error("Enrollment WS error: %s\n%s", _exc, traceback.format_exc())
+        enrollment_service.cancel_enrollment(student_id)
+
+
+@app.get("/api/courses/{course_id}/students")
+def list_course_students(
+    course_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _require_course(professor, course_id)
+    return {"items": repo.list_course_students(course_id)}
 
 
 @app.get("/api/courses/{course_id}/gradebook")

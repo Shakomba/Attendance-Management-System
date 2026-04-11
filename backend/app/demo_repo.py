@@ -231,6 +231,7 @@ class DemoRepository:
                 "Email": email,
                 "ProfilePhotoUrl": None,
                 "IsActive": 1,
+                "EnrollmentStatus": "pending",
                 "CreatedAt": self._utcnow(),
             }
 
@@ -291,7 +292,10 @@ class DemoRepository:
             model_name = str(face_engine.model_name)
 
             exists = any(
-                emb["StudentID"] == student_id and emb["ModelName"] == model_name and emb.get("IsPrimary") == 1
+                emb["StudentID"] == student_id
+                and emb["ModelName"] == model_name
+                and emb.get("IsPrimary") == 1
+                and emb.get("PoseLabel") == "front"
                 for emb in self.embeddings
             )
             if exists:
@@ -309,7 +313,9 @@ class DemoRepository:
                 stats["no_face_in_photo"] += 1
                 continue
 
-            self.upsert_face_embedding(student_id, model_name, face_engine.embedding_to_bytes(embedding))
+            self.upsert_face_embedding(
+                student_id, model_name, face_engine.embedding_to_bytes(embedding), pose_label="front",
+            )
             stats["embeddings_created"] += 1
 
         return stats
@@ -380,6 +386,7 @@ class DemoRepository:
             "Email": payload["email"],
             "ProfilePhotoUrl": payload.get("profile_photo_url"),
             "IsActive": 1,
+            "EnrollmentStatus": "pending",
             "CreatedAt": self._utcnow(),
         }
 
@@ -399,9 +406,15 @@ class DemoRepository:
         self._save_state()
         return {"student_id": student_id, "course_id": course_id}
 
-    def upsert_face_embedding(self, student_id: int, model_name: str, embedding_data: bytes) -> None:
+    def upsert_face_embedding(
+        self, student_id: int, model_name: str, embedding_data: bytes, pose_label: str = "front",
+    ) -> None:
         for emb in self.embeddings:
-            if emb["StudentID"] == student_id and emb["ModelName"] == model_name:
+            if (
+                emb["StudentID"] == student_id
+                and emb["ModelName"] == model_name
+                and emb.get("PoseLabel") == pose_label
+            ):
                 emb["IsPrimary"] = 0
 
         self.embeddings.append(
@@ -409,6 +422,7 @@ class DemoRepository:
                 "StudentID": student_id,
                 "ModelName": model_name,
                 "EmbeddingData": embedding_data,
+                "PoseLabel": pose_label,
                 "IsPrimary": 1,
                 "CreatedAt": self._utcnow(),
             }
@@ -481,10 +495,40 @@ class DemoRepository:
                     "FullName": student["FullName"],
                     "ModelName": model_name,
                     "EmbeddingData": emb["EmbeddingData"],
+                    "PoseLabel": emb.get("PoseLabel", "front"),
                 }
             )
 
         return items
+
+    def mark_student_enrolled(self, student_id: int) -> None:
+        student = self.students.get(student_id)
+        if student:
+            student["EnrollmentStatus"] = "enrolled"
+
+    def get_student_enrollment_status(self, student_id: int) -> str:
+        student = self.students.get(student_id)
+        if not student:
+            return "pending"
+        return str(student.get("EnrollmentStatus", "pending"))
+
+    def list_course_students(self, course_id: int) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for (student_id, cid), _enr in self.enrollments.items():
+            if cid != course_id:
+                continue
+            student = self.students.get(student_id)
+            if not student:
+                continue
+            rows.append({
+                "StudentID": student_id,
+                "StudentCode": student["StudentCode"],
+                "FullName": student["FullName"],
+                "Email": student["Email"],
+                "EnrollmentStatus": student.get("EnrollmentStatus", "pending"),
+            })
+        rows.sort(key=lambda r: r["FullName"])
+        return rows
 
     def get_gradebook(self, course_id: int) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
@@ -676,6 +720,7 @@ class DemoRepository:
                     "IsPresent": attendance.get("IsPresent", 0),
                     "SessionAbsentHours": attendance.get("SessionAbsentHours", 0),
                     "ManualOverride": bool(attendance.get("_ManualLock", False)),
+                    "EnrollmentStatus": student.get("EnrollmentStatus", "pending"),
                 }
             )
 

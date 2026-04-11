@@ -38,6 +38,11 @@ export function useApi() {
             const text = await response.text()
             const data = text ? JSON.parse(text) : null
             if (!response.ok) {
+                if (response.status === 401 && token) {
+                    localStorage.removeItem('ams_token')
+                    localStorage.removeItem('ams_professor')
+                    window.location.reload()
+                }
                 throw new Error(data?.detail || data?.message || text || `HTTP ${response.status}`)
             }
             return data

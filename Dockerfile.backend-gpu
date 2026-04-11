@@ -1,0 +1,15 @@
+# Stage 1 — pull CUDA 12.4 + cuDNN 9 runtime libs from NVIDIA's official image
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS cuda-provider
+
+# Stage 2 — layer CUDA libs on top of the existing image (dlib already compiled)
+FROM ams_backend_img:latest
+
+# Copy CUDA 12 runtime libraries
+COPY --from=cuda-provider /usr/local/cuda/lib64/ /usr/local/cuda/lib64/
+# Copy cuDNN 9 (lives in the distro lib path in runtime images)
+COPY --from=cuda-provider /usr/lib/x86_64-linux-gnu/libcudnn*.so* /usr/local/cuda/lib64/
+
+# Register WSL CUDA stub path for ldconfig (actual libs mounted at runtime via volume)
+RUN echo '/usr/lib/wsl/lib' > /etc/ld.so.conf.d/wsl-cuda.conf
+
+ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:/usr/local/cuda/lib64
