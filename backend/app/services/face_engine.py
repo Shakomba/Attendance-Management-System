@@ -130,12 +130,15 @@ class FaceEngine:
                 inter_w = max(0, inter_x2 - inter_x1)
                 inter_h = max(0, inter_y2 - inter_y1)
                 inter_area = inter_w * inter_h
-                union_area = (
-                    FaceEngine._bbox_area(cx1, cy1, cx2, cy2)
-                    + FaceEngine._bbox_area(kx1, ky1, kx2, ky2)
-                    - inter_area
-                )
-                if union_area > 0 and inter_area / union_area >= iou_threshold:
+                area_c = FaceEngine._bbox_area(cx1, cy1, cx2, cy2)
+                area_k = FaceEngine._bbox_area(kx1, ky1, kx2, ky2)
+                union_area = area_c + area_k - inter_area
+                # Use the larger of standard IoU and intersection-over-min-area.
+                # The latter catches a small box that is fully contained inside a
+                # large box (classic double-detection of the same face at two scales).
+                iou = inter_area / union_area if union_area > 0 else 0.0
+                iom = inter_area / min(area_c, area_k) if min(area_c, area_k) > 0 else 0.0
+                if max(iou, iom) >= iou_threshold:
                     suppressed = True
                     break
             if not suppressed:
