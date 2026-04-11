@@ -74,6 +74,11 @@ class RecognitionService:
         # per (session_id, student_id).  Pruned to antispoof_temporal_window_sec.
         self._temporal_embeddings: Dict[Tuple[str, int], List] = {}
 
+        # Students confirmed present this session. Once in this set all spoof checks
+        # are skipped — face just gets a green overlay with no DB writes or notifications.
+        # {session_id: {student_id, ...}}
+        self._confirmed_students: Dict[str, set] = {}
+
     @staticmethod
     def _session_absent_hours(session_start: datetime, event_time: datetime, grace_minutes: int) -> int:
         elapsed_minutes = (event_time - session_start).total_seconds() / 60
@@ -382,6 +387,24 @@ class RecognitionService:
                 )
                 continue
 
+            # ── Fast-path: already confirmed present this session ──────
+            if match.student_id in self._confirmed_students.get(session_id, set()):
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="recognized",
+                        student_id=match.student_id,
+                        full_name=match.full_name,
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                continue
+
             # ── Step 3: Multi-embedding variance check ─────────────────
             if match.is_suspicious:
                 output.overlays.append(
@@ -541,6 +564,9 @@ class RecognitionService:
                 recognized_at=event_time_db,
             )
             self.repository.upsert_attendance_from_recognition(session_id, match.student_id, event_time_db)
+
+            # Mark as confirmed so future frames skip all checks.
+            self._confirmed_students.setdefault(session_id, set()).add(match.student_id)
 
             attendance = self.repository.get_attendance_row(session_id, match.student_id) or {}
             self._last_event_by_student[cooldown_key] = event_time
