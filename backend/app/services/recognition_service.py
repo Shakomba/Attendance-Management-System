@@ -46,11 +46,11 @@ class ProcessFrameResult:
 
 
 # Seconds within which a student must show distinct matching poses.
-_POSE_LIVENESS_WINDOW_SEC = 6.0
+_POSE_LIVENESS_WINDOW_SEC = 10.0
 # Minimum number of distinct poses the face must match to be considered live.
 # Capped to the number of enrolled poses so students with fewer poses aren't
 # permanently blocked.
-_POSE_LIVENESS_MIN_POSES = 3
+_POSE_LIVENESS_MIN_POSES = 2
 # Distance margin: a pose counts as "matched" if its distance is within this
 # margin of the best-matching pose distance.
 _POSE_MATCH_MARGIN = 0.0
