@@ -456,52 +456,56 @@ class RecognitionService:
                 continue
 
             # ── Step 4.5: Temporal embedding drift check ───────────────
-            # Runs for every matched student (including single-pose enrolled).
-            # Pose liveness only fires when multiple poses are stored; this
-            # catches static spoofs regardless of how many poses were enrolled.
-            te_warmed, te_live = self._check_temporal_liveness(
-                session_id, match.student_id, detection.embedding, event_time,
-            )
-            if not te_warmed:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="verifying",
-                        student_id=match.student_id,
-                        full_name=match.full_name,
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
+            # Skipped for multi-pose-enrolled students — pose liveness (Step 4)
+            # already confirmed the face matched from two distinct angles, which is
+            # a stronger liveness signal than embedding drift.  Running both checks
+            # causes false positives for people sitting still in a classroom.
+            # Only applied as a fallback when the student has a single enrolled pose.
+            student_poses_for_temporal = known_grouped.get(match.student_id, [])
+            if len(student_poses_for_temporal) <= 1:
+                te_warmed, te_live = self._check_temporal_liveness(
+                    session_id, match.student_id, detection.embedding, event_time,
+                )
+                if not te_warmed:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="verifying",
+                            student_id=match.student_id,
+                            full_name=match.full_name,
+                            confidence=match.best_score,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode,
+                            session_absent_hours=absent_hours,
+                        )
                     )
-                )
-                continue
-            if not te_live:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (No Movement)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
+                    continue
+                if not te_live:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="spoof",
+                            student_id=match.student_id,
+                            full_name=f"{match.full_name} (No Movement)",
+                            confidence=match.best_score,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode,
+                            session_absent_hours=absent_hours,
+                        )
                     )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
-                    confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
-                    notes="spoof-temporal:no-embedding-drift",
-                    recognized_at=event_time_db,
-                )
-                continue
+                    self.repository.add_recognition_event(
+                        session_id=session_id,
+                        student_id=match.student_id,
+                        confidence=match.best_score,
+                        engine_mode=self.face_engine.mode,
+                        notes="spoof-temporal:no-embedding-drift",
+                        recognized_at=event_time_db,
+                    )
+                    continue
 
             # ── Step 5: All checks passed — mark attendance ────────────
             output.overlays.append(
