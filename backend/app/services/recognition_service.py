@@ -68,6 +68,10 @@ class RecognitionService:
         # {(session_id, student_id): {"poses": {pose_label: last_seen_datetime}, "first_seen": datetime}}
         self._pose_observations: Dict[Tuple[str, int], Dict] = {}
 
+        # Students confirmed present this session — skip all spoof checks for them.
+        # {session_id: {student_id, ...}}
+        self._confirmed_students: Dict[str, set] = {}
+
     @staticmethod
     def _session_absent_hours(session_start: datetime, event_time: datetime, grace_minutes: int) -> int:
         elapsed_minutes = (event_time - session_start).total_seconds() / 60
@@ -223,38 +227,7 @@ class RecognitionService:
                 if session_start is not None else 0
             )
 
-            # ── Step 1: Texture-based spoof detection ──────────────────
-            if self.spoof_detector and self.spoof_detector.enabled:
-                crop = SpoofDetector.extract_face_crop(
-                    frame_bgr, detection.left, detection.top, detection.right, detection.bottom,
-                )
-                if crop is not None:
-                    spoof_result = self.spoof_detector.analyze(crop)
-                    if not spoof_result.is_live:
-                        output.overlays.append(
-                            FaceOverlay(
-                                event_type="spoof",
-                                student_id=None,
-                                full_name="Spoof Detected",
-                                confidence=spoof_result.confidence,
-                                left=detection.left,
-                                top=detection.top,
-                                right=detection.right,
-                                bottom=detection.bottom,
-                                engine_mode=self.face_engine.mode,
-                            )
-                        )
-                        self.repository.add_recognition_event(
-                            session_id=session_id,
-                            student_id=None,
-                            confidence=None,
-                            engine_mode=self.face_engine.mode,
-                            notes=f"spoof-rejected:{spoof_result.reason}",
-                            recognized_at=event_time_db,
-                        )
-                        continue
-
-            # ── Step 2: Multi-embedding matching ───────────────────────
+            # ── Step 1: Match identity ─────────────────────────────────
             match = None
             if known_grouped:
                 match = self.face_engine.match_embedding_multi(detection.embedding, known_grouped)
@@ -263,7 +236,6 @@ class RecognitionService:
             if match is None and known_faces:
                 flat_match = self.face_engine.match_embedding(detection.embedding, known_faces)
                 if flat_match:
-                    # Wrap as multi-match result with no variance info.
                     from .face_engine import MultiMatchResult
                     match = MultiMatchResult(
                         student_id=flat_match.student_id,
@@ -317,7 +289,60 @@ class RecognitionService:
                 )
                 continue
 
-            # ── Step 3: Multi-embedding variance check ─────────────────
+            # ── Step 2: Already confirmed present — skip all checks ────
+            # Runs before any spoof check so that once a student is marked
+            # present their face (or even a photo of them) always shows green.
+            if match.student_id in self._confirmed_students.get(session_id, set()):
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="recognized",
+                        student_id=match.student_id,
+                        full_name=match.full_name,
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                continue
+
+            # ── Step 3: Texture-based spoof detection ──────────────────
+            # Only reached for students not yet confirmed present.
+            if self.spoof_detector and self.spoof_detector.enabled:
+                crop = SpoofDetector.extract_face_crop(
+                    frame_bgr, detection.left, detection.top, detection.right, detection.bottom,
+                )
+                if crop is not None:
+                    spoof_result = self.spoof_detector.analyze(crop)
+                    if not spoof_result.is_live:
+                        output.overlays.append(
+                            FaceOverlay(
+                                event_type="spoof",
+                                student_id=match.student_id,
+                                full_name=f"{match.full_name} (Spoof)",
+                                confidence=spoof_result.confidence,
+                                left=detection.left,
+                                top=detection.top,
+                                right=detection.right,
+                                bottom=detection.bottom,
+                                engine_mode=self.face_engine.mode,
+                                session_absent_hours=absent_hours,
+                            )
+                        )
+                        self.repository.add_recognition_event(
+                            session_id=session_id,
+                            student_id=match.student_id,
+                            confidence=match.best_score,
+                            engine_mode=self.face_engine.mode,
+                            notes=f"spoof-rejected:{spoof_result.reason}",
+                            recognized_at=event_time_db,
+                        )
+                        continue
+
+            # ── Step 4: Multi-embedding variance check ─────────────────
             if match.is_suspicious:
                 output.overlays.append(
                     FaceOverlay(
@@ -343,7 +368,7 @@ class RecognitionService:
                 )
                 continue
 
-            # ── Step 4: Pose-based liveness check ──────────────────────
+            # ── Step 5: Pose-based liveness check ──────────────────────
             student_poses = known_grouped.get(match.student_id, [])
             warmed_up, is_temporally_live = self._check_pose_liveness(
                 session_id, match.student_id, detection.embedding, student_poses,
@@ -390,7 +415,7 @@ class RecognitionService:
                 )
                 continue
 
-            # ── Step 5: All checks passed — mark attendance ────────────
+            # ── Step 6: All checks passed — mark attendance ────────────
             output.overlays.append(
                 FaceOverlay(
                     event_type="recognized",
@@ -424,6 +449,9 @@ class RecognitionService:
                 recognized_at=event_time_db,
             )
             self.repository.upsert_attendance_from_recognition(session_id, match.student_id, event_time_db)
+
+            # Confirmed — all future frames skip spoof checks entirely.
+            self._confirmed_students.setdefault(session_id, set()).add(match.student_id)
 
             attendance = self.repository.get_attendance_row(session_id, match.student_id) or {}
             self._last_event_by_student[cooldown_key] = event_time
