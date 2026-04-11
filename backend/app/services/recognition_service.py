@@ -45,10 +45,12 @@ class ProcessFrameResult:
     notifications: List[RecognitionEvent]
 
 
-# Seconds within which a student must show 2+ different matching poses.
-_POSE_LIVENESS_WINDOW_SEC = 8.0
+# Seconds within which a student must show distinct matching poses.
+_POSE_LIVENESS_WINDOW_SEC = 6.0
 # Minimum number of distinct poses the face must match to be considered live.
-_POSE_LIVENESS_MIN_POSES = 2
+# Capped to the number of enrolled poses so students with fewer poses aren't
+# permanently blocked.
+_POSE_LIVENESS_MIN_POSES = 3
 # Distance margin: a pose counts as "matched" if its distance is within this
 # margin of the best-matching pose distance.
 _POSE_MATCH_MARGIN = 0.0
@@ -67,6 +69,10 @@ class RecognitionService:
         # Pose-based liveness: track which pose labels matched per (session, student).
         # {(session_id, student_id): {"poses": {pose_label: last_seen_datetime}, "first_seen": datetime}}
         self._pose_observations: Dict[Tuple[str, int], Dict] = {}
+
+        # Temporal embedding drift: circular buffer of recent (embedding, timestamp) pairs
+        # per (session_id, student_id).  Pruned to antispoof_temporal_window_sec.
+        self._temporal_embeddings: Dict[Tuple[str, int], List] = {}
 
     @staticmethod
     def _session_absent_hours(session_start: datetime, event_time: datetime, grace_minutes: int) -> int:
@@ -170,14 +176,73 @@ class RecognitionService:
         elapsed = (now - obs["first_seen"]).total_seconds()
         distinct_poses = len(obs["poses"])
 
-        if distinct_poses >= _POSE_LIVENESS_MIN_POSES:
-            return True, True  # Saw multiple poses — live.
+        # Never require more poses than the student actually has enrolled.
+        effective_min = min(_POSE_LIVENESS_MIN_POSES, len(known_poses))
+
+        if distinct_poses >= effective_min:
+            return True, True  # Saw enough distinct poses — live.
 
         if elapsed < _POSE_LIVENESS_WINDOW_SEC:
             return False, True  # Still in window, keep watching.
 
-        # Window expired with only one pose seen — likely a photo.
+        # Window expired without enough distinct poses — likely a photo.
         return True, False
+
+    def _check_temporal_liveness(
+        self,
+        session_id: str,
+        student_id: int,
+        embedding: np.ndarray,
+        event_time: datetime,
+    ) -> Tuple[bool, bool]:
+        """Check liveness by measuring embedding drift across a rolling time window.
+
+        A genuine face produces natural micro-variation in its embedding over time
+        (lighting shifts, micro-movements, slight expression changes).  A held photo
+        or screen produces near-identical embeddings every frame.
+
+        Returns (warmed_up, is_live):
+        - warmed_up=False: still collecting frames — don't decide yet.
+        - warmed_up=True, is_live=True: enough variation detected — real face.
+        - warmed_up=True, is_live=False: near-zero variation — likely a static spoof.
+        """
+        key = (session_id, student_id)
+        history = self._temporal_embeddings.get(key)
+        if history is None:
+            history = []
+            self._temporal_embeddings[key] = history
+
+        history.append({"embedding": embedding.copy(), "time": event_time})
+
+        # Prune entries outside the rolling window.
+        cutoff = event_time - timedelta(seconds=settings.antispoof_temporal_window_sec)
+        del history[:next((i for i, e in enumerate(history) if e["time"] >= cutoff), len(history))]
+
+        if len(history) < 5:
+            return False, True  # still warming up
+
+        embeds = [e["embedding"] for e in history]
+        total_dist = 0.0
+        count = 0
+
+        if self.face_engine.mode == "cpu":
+            for i in range(len(embeds)):
+                for j in range(i + 1, len(embeds)):
+                    total_dist += float(np.linalg.norm(embeds[i] - embeds[j]))
+                    count += 1
+            mean_dist = total_dist / count if count else 0.0
+            is_live = mean_dist >= settings.antispoof_temporal_threshold_cpu
+        else:
+            for i in range(len(embeds)):
+                for j in range(i + 1, len(embeds)):
+                    n1 = embeds[i] / (np.linalg.norm(embeds[i]) + 1e-9)
+                    n2 = embeds[j] / (np.linalg.norm(embeds[j]) + 1e-9)
+                    total_dist += 1.0 - float(np.dot(n1, n2))
+                    count += 1
+            mean_dist = total_dist / count if count else 0.0
+            is_live = mean_dist >= settings.antispoof_temporal_threshold_gpu
+
+        return True, is_live
 
     def known_face_count_for_session(self, session_id: str) -> int:
         session = self.repository.get_session(session_id)
@@ -386,6 +451,54 @@ class RecognitionService:
                     confidence=match.best_score,
                     engine_mode=self.face_engine.mode,
                     notes="spoof-static:temporal-consistency-failed",
+                    recognized_at=event_time_db,
+                )
+                continue
+
+            # ── Step 4.5: Temporal embedding drift check ───────────────
+            # Runs for every matched student (including single-pose enrolled).
+            # Pose liveness only fires when multiple poses are stored; this
+            # catches static spoofs regardless of how many poses were enrolled.
+            te_warmed, te_live = self._check_temporal_liveness(
+                session_id, match.student_id, detection.embedding, event_time,
+            )
+            if not te_warmed:
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="verifying",
+                        student_id=match.student_id,
+                        full_name=match.full_name,
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                continue
+            if not te_live:
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="spoof",
+                        student_id=match.student_id,
+                        full_name=f"{match.full_name} (No Movement)",
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                self.repository.add_recognition_event(
+                    session_id=session_id,
+                    student_id=match.student_id,
+                    confidence=match.best_score,
+                    engine_mode=self.face_engine.mode,
+                    notes="spoof-temporal:no-embedding-drift",
                     recognized_at=event_time_db,
                 )
                 continue

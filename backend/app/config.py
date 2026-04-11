@@ -46,11 +46,19 @@ class Settings:
     # Anti-spoofing
     antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "true"), True)
     # Laplacian variance: real face ~200-800, phone screen ~80-200, print ~30-80.
-    antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "80.0"))
-    # LBP histogram std is in 0.003-0.010 range (normalized 256-bin hist). Old default 0.25 was wrong scale.
-    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.004"))
+    antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "120.0"))
+    # LBP histogram std is in 0.003-0.010 range (normalized 256-bin hist).
+    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.006"))
     antispoof_frequency_threshold: float = float(os.getenv("ANTISPOOF_FREQUENCY_THRESHOLD", "0.35"))
-    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.45"))
+    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.52"))
+    # Temporal embedding drift: real faces vary slightly each frame; static photos don't.
+    # Window over which to collect embeddings before deciding.
+    antispoof_temporal_window_sec: float = float(os.getenv("ANTISPOOF_TEMPORAL_WINDOW_SEC", "2.5"))
+    # Minimum mean pairwise distance across the window to be considered live.
+    # CPU (HOG 128-d L2): real face ≈ 0.02-0.10, static photo ≈ 0.001-0.005.
+    antispoof_temporal_threshold_cpu: float = float(os.getenv("ANTISPOOF_TEMPORAL_THRESHOLD_CPU", "0.006"))
+    # GPU (ArcFace 512-d cosine dist): real face ≈ 0.002-0.015, static photo ≈ 0.00005-0.0003.
+    antispoof_temporal_threshold_gpu: float = float(os.getenv("ANTISPOOF_TEMPORAL_THRESHOLD_GPU", "0.0004"))
 
     # Enrollment
     enrollment_pose_distance_threshold: float = float(os.getenv("ENROLLMENT_POSE_DISTANCE_THRESHOLD", "0.15"))
