@@ -616,6 +616,76 @@ class Repository:
 
 
     @staticmethod
+    def list_sessions_with_summary(course_id: int) -> List[Dict[str, Any]]:
+        """Return all sessions for a course with attendance summary and absentee list."""
+        sessions = fetch_all(
+            """
+            SELECT
+                CAST(cs.SessionID AS NVARCHAR(36)) AS SessionID,
+                c.CourseName,
+                cs.StartedAt,
+                cs.EndedAt,
+                cs.Status,
+                COUNT(e.StudentID) AS TotalEnrolled,
+                SUM(CASE WHEN ISNULL(sa.IsPresent, 0) = 1 THEN 1 ELSE 0 END) AS PresentCount
+            FROM dbo.ClassSessions cs
+            INNER JOIN dbo.Courses c ON c.CourseID = cs.CourseID
+            LEFT JOIN dbo.Enrollments e ON e.CourseID = cs.CourseID
+            LEFT JOIN dbo.SessionAttendance sa
+                ON sa.SessionID = cs.SessionID
+               AND sa.StudentID = e.StudentID
+            WHERE cs.CourseID = ?
+            GROUP BY cs.SessionID, c.CourseName, cs.StartedAt, cs.EndedAt, cs.Status
+            ORDER BY cs.StartedAt DESC;
+            """,
+            (course_id,),
+        )
+
+        result = []
+        for row in sessions:
+            session_id = row["SessionID"]
+            total = int(row["TotalEnrolled"] or 0)
+            present = int(row["PresentCount"] or 0)
+
+            # Fetch absentees for this session
+            absentees_rows = fetch_all(
+                """
+                SELECT s.StudentID, s.FullName
+                FROM dbo.Enrollments e
+                INNER JOIN dbo.Students s ON s.StudentID = e.StudentID
+                LEFT JOIN dbo.SessionAttendance sa
+                    ON sa.SessionID = ? AND sa.StudentID = e.StudentID
+                WHERE e.CourseID = ?
+                  AND ISNULL(sa.IsPresent, 0) = 0
+                ORDER BY s.FullName;
+                """,
+                (session_id, course_id),
+            )
+
+            started = row["StartedAt"]
+            ended = row["EndedAt"]
+            status = str(row["Status"] or "unknown").lower()
+            if ended is not None:
+                status = "finalized"
+
+            result.append({
+                "session_id": session_id,
+                "course_name": row["CourseName"],
+                "started_at": started.isoformat() if started else None,
+                "ended_at": ended.isoformat() if ended else None,
+                "status": status,
+                "total_enrolled": total,
+                "present_count": present,
+                "absent_count": total - present,
+                "absentees": [
+                    {"student_id": r["StudentID"], "full_name": r["FullName"]}
+                    for r in absentees_rows
+                ],
+            })
+
+        return result
+
+    @staticmethod
     def insert_email_log(
         session_id: str,
         student_id: int,

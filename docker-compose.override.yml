@@ -1,0 +1,10 @@
+services:
+  backend:
+    environment:
+      DEMO_MODE: "false"
+      JWT_SECRET_KEY: "527c69d76cfc60bc80cf29de0fa3c254167d0a34764fa4a2bfc7307549549968cece55cea5c830f53ac5f69f23d330a44250ac39fee5fb233c85f22a970fc3fa"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000,https://app.shakomba.org"
+      CPU_FACE_DETECT_MODEL: "hog"
+
+  # Frontend uses https://api.shakomba.org (from docker-compose.yml) so it works
+  # from any device (PC, phone, Cloudflare tunnel) — not just localhost.

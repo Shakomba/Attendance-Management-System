@@ -10,7 +10,10 @@
       "Bash(ls /home/Shakomba/Projects/Attendance-Management-System/backend/.venv*/)",
       "Bash(python3 -c \":*)",
       "Bash(npm run:*)",
-      "Bash(wsl -d Debian -u root bash)"
+      "Bash(wsl -d Debian -u root bash)",
+      "Bash(docker info:*)",
+      "Read(//mnt/c/Users/Shakomba/**)",
+      "Bash(docker build:*)"
     ]
   }
 }

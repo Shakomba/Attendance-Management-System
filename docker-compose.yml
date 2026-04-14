@@ -134,7 +134,7 @@ services:
     depends_on:
       - frontend
       - backend
-    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiMWQ4NmFhNTctNGVhMy00YmM2LWE3ZjYtY2YyNDI0NTg3MzIwIiwicyI6IlFqQ2MrNklUQ3BjN3hTWkx3NFcxOHVtZHYvS2t3OTB3ZzdtSm9YaEJUeTdSTmJRa2duaUZpTnZTc3FNc0g1MjJ3dmJtYlFGUHFza0wzcENTTGF1eVhBPT0ifQ==
+    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiNmIyOWQ2ZGMtODQxYy00NjJlLThlMzAtM2MyNzE1NmJhOGM1IiwicyI6IlpqVXpaR1UzWW1VdE9UaGhNUzAwWWpJekxUazNNRGd0TVRaa01USTNObVZqTm1abCJ9
     networks:
       - ams_net
 

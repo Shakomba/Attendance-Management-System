@@ -80,8 +80,8 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
           </button>
         </div>
 
-        {/* Student list */}
-        <div className="divide-y divide-border max-h-[calc(100vh-320px)] overflow-auto">
+        {/* Student list — natural page scroll, no fixed height */}
+        <div className="divide-y divide-border">
           {loading && students.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-secondary">
               <Loader2 size={20} className="animate-spin mr-2" />

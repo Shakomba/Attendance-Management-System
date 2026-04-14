@@ -14,13 +14,19 @@ def build_connection_string() -> str:
         return settings.sql_connection_string
 
     trust_value = "yes" if settings.sql_trust_server_cert else "no"
+    # Encrypt=Optional avoids TLS cert verification failures on self-signed certs
+    # (ODBC Driver 18 defaults to Encrypt=yes which requires a valid CA-signed cert).
+    encrypt_value = "Optional" if settings.sql_trust_server_cert else "yes"
+    # Wrap password in {} to escape special ODBC delimiter characters (;, {, })
+    safe_pwd = settings.sql_password.replace("}", "}}")
     return (
         f"DRIVER={{{settings.sql_driver}}};"
         f"SERVER={settings.sql_server},{settings.sql_port};"
         f"DATABASE={settings.sql_database};"
         f"UID={settings.sql_user};"
-        f"PWD={settings.sql_password};"
+        f"PWD={{{safe_pwd}}};"
         f"TrustServerCertificate={trust_value};"
+        f"Encrypt={encrypt_value};"
     )
 
 

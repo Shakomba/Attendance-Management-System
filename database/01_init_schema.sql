@@ -47,8 +47,9 @@ CREATE TABLE dbo.Students
     FullName        NVARCHAR(120) NOT NULL,
     Email           NVARCHAR(255) NOT NULL UNIQUE,
     ProfilePhotoUrl NVARCHAR(500) NULL,
-    IsActive        BIT NOT NULL CONSTRAINT DF_Students_IsActive DEFAULT (1),
-    CreatedAt       DATETIME2(0) NOT NULL CONSTRAINT DF_Students_CreatedAt DEFAULT (SYSUTCDATETIME())
+    IsActive          BIT NOT NULL CONSTRAINT DF_Students_IsActive DEFAULT (1),
+    EnrollmentStatus  NVARCHAR(20) NOT NULL CONSTRAINT DF_Students_EnrollmentStatus DEFAULT (N'pending'),
+    CreatedAt         DATETIME2(0) NOT NULL CONSTRAINT DF_Students_CreatedAt DEFAULT (SYSUTCDATETIME())
 );
 GO
 
@@ -148,13 +149,14 @@ CREATE TABLE dbo.StudentFaceEmbeddings
     ModelName     NVARCHAR(40) NOT NULL,  -- hog-128 / insightface-512
     EmbeddingData VARBINARY(MAX) NOT NULL,
     IsPrimary     BIT NOT NULL CONSTRAINT DF_Embeddings_IsPrimary DEFAULT (1),
+    PoseLabel     NVARCHAR(30) NOT NULL CONSTRAINT DF_Embeddings_PoseLabel DEFAULT (N'front'),
     CreatedAt     DATETIME2(0) NOT NULL CONSTRAINT DF_Embeddings_CreatedAt DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT FK_Embeddings_Students FOREIGN KEY (StudentID) REFERENCES dbo.Students(StudentID)
 );
 GO
 
 CREATE UNIQUE INDEX UX_Embeddings_Primary
-ON dbo.StudentFaceEmbeddings (StudentID, ModelName)
+ON dbo.StudentFaceEmbeddings (StudentID, ModelName, PoseLabel)
 WHERE IsPrimary = 1;
 GO
 
@@ -244,7 +246,7 @@ BEGIN
     SET NOCOUNT ON;
 
     SET @StartedAt = ISNULL(@StartedAt, SYSUTCDATETIME());
-    SET @SessionID = NEWSEQUENTIALID();
+    SET @SessionID = NEWID();
 
     INSERT INTO dbo.ClassSessions (SessionID, CourseID, StartedAt, Status)
     VALUES (@SessionID, @CourseID, @StartedAt, N'active');
@@ -511,14 +513,75 @@ CREATE INDEX IX_SessionHourLog_Session ON dbo.SessionHourLog (SessionID, HourInd
 GO
 
 /* ---------- Starter seed data ---------- */
+
+-- 5 courses (matches demo mode)
 INSERT INTO dbo.Courses (CourseCode, CourseName, ScheduledStartTime, LateGraceMinutes, MaxAllowedAbsentHours)
 VALUES
-    (N'CS101', N'Distributed AI Systems', '09:00:00', 10, 4),
-    (N'CS102', N'Applied Machine Vision', '13:00:00', 10, 4);
+    (N'CS201', N'Database Systems',                    '09:00:00', 10, 4),
+    (N'CS202', N'Data Structure and Algorithms',       '10:30:00', 10, 4),
+    (N'CS203', N'Computer Networks',                   '13:00:00', 10, 4),
+    (N'CS204', N'Engineering Analysis',                '14:30:00', 10, 4),
+    (N'CS205', N'Software Requirement and Analysis',   '16:00:00', 10, 4);
 GO
 
--- Password: admin123  (SHA-256 hash)
+-- 6 professors with bcrypt-hashed passwords (rounds=12)
+-- mr.halgurd  / sXtLC8K7KkK2VzLz7D
+-- dr.saman    / CepEdyR181lZSZHhUP
+-- mr.jafar    / zVmgdH7Lv0gQrzgESW
+-- mr.awder    / pZZOIjldVUjZ8l1vV0
+-- mrs.sakar   / DftGKz3DUpLkF5rxdY
+-- dr.ahmed    / admin123
 INSERT INTO dbo.Professors (Username, PasswordHash, FullName, CourseID)
 VALUES
-    (N'dr.ahmed', N'240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', N'Dr. Ahmed Hassan', 1);
+    (N'mr.halgurd', N'$2b$12$VN0GOOFbjaJada92iE2u0ON47F32g0suXu1/8gyP3k.mkHXduoclW', N'Mr. Halgurd Rasul',   1),
+    (N'dr.saman',   N'$2b$12$QCiafOKwPz3C5lrnb.9sMeWaOKb.FdRIVDNYZ7/X/ZZrTozVeyrSi', N'Dr. Saman Mohammad',  2),
+    (N'mr.jafar',   N'$2b$12$45a6axITY0s6A0IbhZq81.A7qg4hTtyORbIGPmTmK9Zd7iZ8crpbm', N'Mr. Jafar Majidpoor', 3),
+    (N'mr.awder',   N'$2b$12$eyEfStgoVIBQE1Jp5hAF.uZkitWoHuLD9XVwVFFB7K0OKgD5CX9FG', N'Mr. Awder Sardar',    4),
+    (N'mrs.sakar',  N'$2b$12$0WHIo2Ja3PS9vwUqM7ZqZ..hqJYqk52ZrIhJufdbIB3dGiGrz5.Nm', N'Mrs. Sakar Omar',     5),
+    (N'dr.ahmed',   N'$2b$12$5Mg4pQNLRAxfmx6EyvFEYubmdz.ZGTX581yE2pmmT7.t.0nccX.We', N'Dr. Ahmed Hassan',    1);
+GO
+
+-- 5 students
+INSERT INTO dbo.Students (StudentCode, FullName, Email)
+VALUES
+    (N'S001', N'Redeen Sirwan',  N'redeen.611224020@uor.edu.krd'),
+    (N'S002', N'Rebin Hussain',  N'rebin.611224019@uor.edu.krd'),
+    (N'S003', N'Drwd Samal',     N'drwd.611224013@uor.edu.krd'),
+    (N'S004', N'Arsh Khasraw',   N'arsh.611224002@uor.edu.krd'),
+    (N'S005', N'Abdulla Sleman', N'abdulla.611224030@uor.edu.krd');
+GO
+
+-- Enroll all 5 students in all 5 courses with seeded grades (random.Random(20260325))
+INSERT INTO dbo.Enrollments (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade, AssignmentGrade, MidtermGrade, FinalExamGrade, HoursAbsentTotal)
+VALUES
+    -- Redeen Sirwan (StudentID 1)
+    (1, 1,  6.29,  4.62,  8.66,  6.85, 14.56, 38.58, 0.0),
+    (1, 2,  4.35,  6.94, 13.68,  5.73, 21.45, 46.04, 1.4),
+    (1, 3,  9.25,  7.28, 13.09,  9.22, 18.12, 45.68, 0.8),
+    (1, 4,  7.34,  7.79, 13.45,  6.25, 21.20, 31.80, 0.5),
+    (1, 5,  5.61,  5.14, 10.36,  4.86, 18.93, 37.97, 1.2),
+    -- Rebin Hussain (StudentID 2)
+    (2, 1,  4.29,  6.72, 12.00,  6.83, 17.28, 34.53, 2.0),
+    (2, 2,  6.61,  7.49, 13.72,  8.70, 12.92, 44.58, 1.4),
+    (2, 3,  6.00,  8.01, 13.89,  9.02, 15.20, 46.14, 0.6),
+    (2, 4,  9.02,  6.48, 12.68,  5.19, 13.36, 43.61, 1.2),
+    (2, 5,  5.41,  7.26, 13.24,  7.52, 17.32, 32.80, 0.9),
+    -- Drwd Samal (StudentID 3)
+    (3, 1,  4.48,  5.81, 13.98,  7.93, 18.46, 40.00, 1.9),
+    (3, 2,  5.84,  5.58,  9.97,  4.46, 22.90, 32.48, 0.6),
+    (3, 3,  4.22,  8.61, 14.13,  6.50, 19.68, 41.06, 0.5),
+    (3, 4,  5.91,  9.33,  9.06,  5.16, 14.26, 39.77, 0.9),
+    (3, 5,  8.21,  7.13, 11.37,  6.88, 13.78, 34.84, 0.6),
+    -- Arsh Khasraw (StudentID 4)
+    (4, 1,  5.57,  4.89, 14.35,  5.00, 22.36, 39.69, 0.1),
+    (4, 2,  7.85,  7.28,  8.17,  6.33, 22.25, 31.10, 1.5),
+    (4, 3,  8.87,  7.24, 14.00,  9.38, 17.44, 31.62, 0.9),
+    (4, 4,  5.90,  9.43, 12.66,  4.59, 17.95, 28.96, 0.8),
+    (4, 5,  8.17,  6.00, 13.13,  9.35, 23.79, 30.76, 1.4),
+    -- Abdulla Sleman (StudentID 5)
+    (5, 1,  6.44,  6.49, 12.00,  6.47, 16.32, 41.84, 1.8),
+    (5, 2,  7.13,  5.95,  9.95,  9.27, 21.35, 34.55, 1.3),
+    (5, 3,  7.27,  6.07,  9.72,  5.54, 18.69, 31.02, 0.6),
+    (5, 4,  8.31,  6.13, 11.72,  9.45, 21.68, 42.71, 1.2),
+    (5, 5,  4.77,  6.79, 10.71,  7.77, 18.32, 39.92, 0.6);
 GO

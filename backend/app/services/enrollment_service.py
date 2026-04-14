@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+
+_log = logging.getLogger("enrollment")
 
 from ..config import settings
 from .face_engine import FaceEngine
