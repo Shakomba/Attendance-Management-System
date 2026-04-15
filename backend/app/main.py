@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import csv
+import io
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,6 +9,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -15,6 +18,7 @@ from starlette.responses import Response
 
 from .auth import create_access_token, decode_token, get_current_professor
 from .config import settings
+from . import webauthn_service as _wa
 from .demo_repo import DemoRepository
 from .repos import Repository
 from .schemas import (
@@ -78,6 +82,7 @@ async def lifespan(application):
             print(f"[startup] Demo embedding bootstrap: {stats}")
         except Exception as exc:  # pragma: no cover
             print(f"[startup] Demo embedding bootstrap failed: {exc}")
+    repo.ensure_webauthn_table()
     yield
 
 
@@ -157,6 +162,128 @@ def login(request: Request, payload: LoginRequest) -> LoginResponse:
         course_id=result["course_id"],
     )
     return LoginResponse(**result, access_token=token)
+
+
+# ── WebAuthn / Passkey endpoints ────────────────────────────────────────────
+
+@app.post("/api/auth/webauthn/register/begin")
+def webauthn_register_begin(professor: dict = Depends(get_current_professor)) -> dict:
+    prof_row = repo.get_professor_by_username(professor["username"])
+    if not prof_row:
+        raise HTTPException(status_code=404, detail="Professor not found.")
+    session_id, options_json = _wa.begin_registration(
+        professor_id=prof_row["ProfessorID"],
+        username=professor["username"],
+        full_name=prof_row["FullName"],
+    )
+    return {"session_id": session_id, "options": json.loads(options_json)}
+
+
+@app.post("/api/auth/webauthn/register/complete")
+def webauthn_register_complete(
+    payload: dict,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    session_id = payload.get("session_id", "")
+    credential_json = json.dumps(payload.get("credential", {}))
+    device_name = str(payload.get("device_name", ""))[:100] or "Unknown device"
+    try:
+        data = _wa.complete_registration(session_id, credential_json)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    repo.save_webauthn_credential(
+        professor_id=data["professor_id"],
+        credential_id=data["credential_id"],
+        public_key=data["public_key"],
+        sign_count=data["sign_count"],
+        device_name=device_name,
+    )
+    return {"ok": True, "credential_id": data["credential_id"], "device_name": device_name}
+
+
+@app.post("/api/auth/webauthn/authenticate/begin")
+def webauthn_authenticate_begin(payload: dict) -> dict:
+    username = payload.get("username", "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username is required.")
+    prof_row = repo.get_professor_by_username(username)
+    if not prof_row:
+        # Don't reveal whether user exists; return empty options
+        session_id, options_json = _wa.begin_authentication([])
+        return {"session_id": session_id, "options": json.loads(options_json)}
+    creds = repo.get_webauthn_credentials_for_professor(prof_row["ProfessorID"])
+    credential_ids = [
+        base64.urlsafe_b64decode(c["CredentialID"] + "==") for c in creds
+    ]
+    session_id, options_json = _wa.begin_authentication(credential_ids)
+    return {"session_id": session_id, "options": json.loads(options_json)}
+
+
+@app.post("/api/auth/webauthn/authenticate/complete")
+def webauthn_authenticate_complete(payload: dict) -> LoginResponse:
+    username = payload.get("username", "").strip()
+    session_id = payload.get("session_id", "")
+    credential_json = json.dumps(payload.get("credential", {}))
+
+    prof_row = repo.get_professor_by_username(username)
+    if not prof_row:
+        raise HTTPException(status_code=401, detail="Authentication failed.")
+
+    credential_id = payload.get("credential", {}).get("id", "")
+    stored = repo.get_webauthn_credential_by_id(credential_id)
+    if not stored or int(stored["ProfessorID"]) != int(prof_row["ProfessorID"]):
+        raise HTTPException(status_code=401, detail="Authentication failed.")
+
+    try:
+        new_sign_count = _wa.complete_authentication(
+            session_id=session_id,
+            credential_json=credential_json,
+            public_key_bytes=bytes(stored["PublicKey"]),
+            sign_count=int(stored["SignCount"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    repo.update_webauthn_sign_count(credential_id, new_sign_count)
+
+    token = create_access_token(
+        professor_id=prof_row["ProfessorID"],
+        username=prof_row["Username"],
+        course_id=prof_row["CourseID"],
+    )
+    return LoginResponse(
+        professor_id=prof_row["ProfessorID"],
+        username=prof_row["Username"],
+        full_name=prof_row["FullName"],
+        course_id=prof_row["CourseID"],
+        course_name=prof_row.get("CourseName", ""),
+        course_code=prof_row.get("CourseCode", ""),
+        access_token=token,
+    )
+
+
+@app.get("/api/auth/webauthn/credentials")
+def webauthn_list_credentials(professor: dict = Depends(get_current_professor)) -> dict:
+    creds = repo.list_webauthn_credentials(int(professor["sub"]))
+    return {"items": [
+        {
+            "credential_id": c["CredentialID"],
+            "device_name": c["DeviceName"],
+            "created_at": c["CreatedAt"].isoformat() if hasattr(c["CreatedAt"], "isoformat") else str(c["CreatedAt"]),
+        }
+        for c in creds
+    ]}
+
+
+@app.delete("/api/auth/webauthn/credentials/{credential_id}")
+def webauthn_delete_credential(
+    credential_id: str,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    deleted = repo.delete_webauthn_credential(credential_id, int(professor["sub"]))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Credential not found.")
+    return {"ok": True}
 
 
 @app.get("/api/health")
@@ -359,6 +486,91 @@ def update_student_grades(
     return GenericMessage(message="Grades updated.", data=updated)
 
 
+_GRADE_FIELDS = ["Quiz1", "Quiz2", "ProjectGrade", "AssignmentGrade", "MidtermGrade", "FinalExamGrade", "HoursAbsentTotal"]
+_CSV_HEADERS = ["StudentID", "FullName", "Email"] + _GRADE_FIELDS
+
+
+@app.get("/api/courses/{course_id}/gradebook/export")
+def export_gradebook(
+    course_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> StreamingResponse:
+    _require_course(professor, course_id)
+    rows = repo.get_gradebook(course_id)
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_CSV_HEADERS, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({h: ("" if r.get(h) is None else r[h]) for h in _CSV_HEADERS})
+
+    buf.seek(0)
+    filename = f"gradebook_course_{course_id}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/courses/{course_id}/gradebook/import")
+async def import_gradebook(
+    course_id: int,
+    file: UploadFile = File(...),
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _require_course(professor, course_id)
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are accepted.")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # strip BOM if present
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded.")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "StudentID" not in reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV must contain a StudentID column.")
+
+    updated, errors = 0, []
+    for i, row in enumerate(reader, start=2):  # row 1 is header
+        sid_raw = row.get("StudentID", "").strip()
+        if not sid_raw:
+            continue
+        try:
+            student_id = int(sid_raw)
+        except ValueError:
+            errors.append(f"Row {i}: invalid StudentID '{sid_raw}'")
+            continue
+
+        def _parse(val: Optional[str]) -> Optional[float]:
+            if val is None or val.strip() == "":
+                return None
+            try:
+                return float(val.strip())
+            except ValueError:
+                return None
+
+        grades = {
+            "quiz1": _parse(row.get("Quiz1")),
+            "quiz2": _parse(row.get("Quiz2")),
+            "project": _parse(row.get("ProjectGrade")),
+            "assignment": _parse(row.get("AssignmentGrade")),
+            "midterm": _parse(row.get("MidtermGrade")),
+            "final_exam": _parse(row.get("FinalExamGrade")),
+            "hours_absent_total": _parse(row.get("HoursAbsentTotal")),
+        }
+
+        try:
+            repo.update_student_grades(course_id, student_id, grades)
+            updated += 1
+        except ValueError as exc:
+            errors.append(f"Row {i} (StudentID {student_id}): {exc}")
+
+    return {"updated": updated, "errors": errors}
+
+
 @app.post("/api/sessions/start", response_model=StartSessionResponse)
 def start_session(
     payload: StartSessionRequest,
@@ -410,15 +622,17 @@ def update_session_attendance(
 @app.post("/api/sessions/{session_id}/finalize-send-emails", response_model=FinalizeSessionResponse)
 async def finalize_and_email(
     session_id: str,
+    send_emails: bool = Query(default=True),
     professor: dict = Depends(get_current_professor),
 ) -> FinalizeSessionResponse:
     _get_session_or_403(professor, session_id)
     repo.finalize_session(session_id)
 
-    async def _send():
-        await asyncio.to_thread(email_service.send_absentee_reports, session_id)
+    if send_emails:
+        async def _send():
+            await asyncio.to_thread(email_service.send_absentee_reports, session_id)
+        asyncio.create_task(_send())
 
-    asyncio.create_task(_send())
     return FinalizeSessionResponse(session_id=session_id, emails_sent=0, email_failures=0)
 
 
@@ -430,6 +644,16 @@ def get_sessions_history(
     _require_course(professor, course_id)
     sessions = repo.list_sessions_with_summary(course_id)
     return {"sessions": sessions}
+
+
+@app.post("/api/courses/{course_id}/reset")
+def reset_course_data(
+    course_id: int,
+    professor: dict = Depends(get_current_professor),
+) -> dict:
+    _require_course(professor, course_id)
+    repo.reset_course_data(course_id)
+    return {"ok": True, "course_id": course_id}
 
 
 @app.post("/api/courses/{course_id}/emails/send", response_model=BulkEmailResponse)

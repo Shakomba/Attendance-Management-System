@@ -107,6 +107,9 @@ class DemoRepository:
 
         self.email_logs: List[Dict[str, Any]] = []
 
+        # WebAuthn: list of {credential_id, professor_id, public_key (bytes), sign_count, device_name, created_at}
+        self._webauthn_credentials: List[Dict[str, Any]] = []
+
         _env = os.environ.get("DEMO_STATE_FILE", "")
         self._state_file = Path(_env) if _env else _DEFAULT_STATE_FILE
 
@@ -331,17 +334,12 @@ class DemoRepository:
 
     @staticmethod
     def _compute_metrics(enrollment: Dict[str, Any], max_absent: int) -> Dict[str, Any]:
-        raw_total = (
-            float(enrollment["Quiz1"])
-            + float(enrollment["Quiz2"])
-            + float(enrollment["ProjectGrade"])
-            + float(enrollment["AssignmentGrade"])
-            + float(enrollment["MidtermGrade"])
-            + float(enrollment["FinalExamGrade"])
-        )
+        g = lambda k: float(enrollment[k]) if enrollment.get(k) is not None else 0.0
+        raw_total = g("Quiz1") + g("Quiz2") + g("ProjectGrade") + g("AssignmentGrade") + g("MidtermGrade") + g("FinalExamGrade")
         penalty = min(float(enrollment["HoursAbsentTotal"]), 5.0)
         adjusted = max(0.0, raw_total - penalty)
-        at_risk_policy = adjusted < 60 or float(enrollment["HoursAbsentTotal"]) >= max_absent
+        has_any_grade = any(enrollment.get(k) is not None for k in ("Quiz1", "Quiz2", "ProjectGrade", "AssignmentGrade", "MidtermGrade", "FinalExamGrade"))
+        at_risk_policy = (has_any_grade and adjusted < 60) or float(enrollment["HoursAbsentTotal"]) >= max_absent
         return {
             "RawTotal": round(raw_total, 2),
             "AttendancePenalty": round(penalty, 2),
@@ -583,12 +581,12 @@ class DemoRepository:
         if not enrollment:
             raise ValueError("Enrollment was not found for grade update.")
 
-        enrollment["Quiz1"] = float(grades["quiz1"])
-        enrollment["Quiz2"] = float(grades["quiz2"])
-        enrollment["ProjectGrade"] = float(grades["project"])
-        enrollment["AssignmentGrade"] = float(grades["assignment"])
-        enrollment["MidtermGrade"] = float(grades["midterm"])
-        enrollment["FinalExamGrade"] = float(grades["final_exam"])
+        enrollment["Quiz1"] = None if grades["quiz1"] is None else float(grades["quiz1"])
+        enrollment["Quiz2"] = None if grades["quiz2"] is None else float(grades["quiz2"])
+        enrollment["ProjectGrade"] = None if grades["project"] is None else float(grades["project"])
+        enrollment["AssignmentGrade"] = None if grades["assignment"] is None else float(grades["assignment"])
+        enrollment["MidtermGrade"] = None if grades["midterm"] is None else float(grades["midterm"])
+        enrollment["FinalExamGrade"] = None if grades["final_exam"] is None else float(grades["final_exam"])
         if grades.get("hours_absent_total") is not None:
             enrollment["HoursAbsentTotal"] = max(0.0, float(grades["hours_absent_total"]))
         enrollment["UpdatedAt"] = self._utcnow()
@@ -968,6 +966,87 @@ class DemoRepository:
 
         rows.sort(key=lambda row: row["FullName"])
         return rows
+
+    def reset_course_data(self, course_id: int) -> None:
+        """Null out grades, zero absences, and delete all session history for a course."""
+        for enrollment in self._enrollments.values():
+            if enrollment.get("CourseID") == course_id:
+                enrollment.update({
+                    "Quiz1": None, "Quiz2": None, "ProjectGrade": None,
+                    "AssignmentGrade": None, "MidtermGrade": None,
+                    "FinalExamGrade": None, "HoursAbsentTotal": 0.0,
+                    "AttendancePenalty": 0.0, "RawTotal": 0.0,
+                    "AdjustedTotal": 0.0, "AtRiskByPolicy": False,
+                })
+        session_ids = [
+            sid for sid, s in self._sessions.items()
+            if s.get("CourseID") == course_id
+        ]
+        for sid in session_ids:
+            self._sessions.pop(sid, None)
+            self._attendance.pop(sid, None)
+            self._recognitions[:] = [r for r in self._recognitions if r.get("SessionID") != sid]
+
+    # ── WebAuthn ──────────────────────────────────────────────────────────────
+
+    def ensure_webauthn_table(self) -> None:
+        pass  # No-op for in-memory repo
+
+    def list_webauthn_credentials(self, professor_id: int) -> List[Dict[str, Any]]:
+        return [
+            {"CredentialID": c["credential_id"], "DeviceName": c["device_name"], "CreatedAt": c["created_at"]}
+            for c in self._webauthn_credentials if c["professor_id"] == professor_id
+        ]
+
+    def get_webauthn_credentials_for_professor(self, professor_id: int) -> List[Dict[str, Any]]:
+        return [
+            {"CredentialID": c["credential_id"], "PublicKey": c["public_key"], "SignCount": c["sign_count"]}
+            for c in self._webauthn_credentials if c["professor_id"] == professor_id
+        ]
+
+    def get_professor_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        prof = self.professors.get(username)
+        if not prof or not prof.get("IsActive"):
+            return None
+        course = self.courses.get(prof["CourseID"], {})
+        return {
+            "ProfessorID": prof["ProfessorID"],
+            "Username": prof["Username"],
+            "FullName": prof["FullName"],
+            "CourseID": prof["CourseID"],
+            "CourseName": course.get("CourseName", ""),
+            "CourseCode": course.get("CourseCode", ""),
+        }
+
+    def get_webauthn_credential_by_id(self, credential_id: str) -> Optional[Dict[str, Any]]:
+        for c in self._webauthn_credentials:
+            if c["credential_id"] == credential_id:
+                return {"CredentialID": c["credential_id"], "ProfessorID": c["professor_id"], "PublicKey": c["public_key"], "SignCount": c["sign_count"]}
+        return None
+
+    def save_webauthn_credential(self, professor_id: int, credential_id: str, public_key: bytes, sign_count: int, device_name: str) -> None:
+        self._webauthn_credentials.append({
+            "credential_id": credential_id,
+            "professor_id": professor_id,
+            "public_key": public_key,
+            "sign_count": sign_count,
+            "device_name": device_name,
+            "created_at": self._utcnow(),
+        })
+
+    def update_webauthn_sign_count(self, credential_id: str, new_sign_count: int) -> None:
+        for c in self._webauthn_credentials:
+            if c["credential_id"] == credential_id:
+                c["sign_count"] = new_sign_count
+                return
+
+    def delete_webauthn_credential(self, credential_id: str, professor_id: int) -> bool:
+        before = len(self._webauthn_credentials)
+        self._webauthn_credentials = [
+            c for c in self._webauthn_credentials
+            if not (c["credential_id"] == credential_id and c["professor_id"] == professor_id)
+        ]
+        return len(self._webauthn_credentials) < before
 
     def insert_email_log(
         self,

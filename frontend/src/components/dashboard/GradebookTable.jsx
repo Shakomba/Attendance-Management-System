@@ -15,7 +15,7 @@ const finalColumns = [
 
 function computeRow(row) {
   const isDropped = Number(row.HoursAbsentTotal) >= 5;
-  const isAtRisk = !isDropped && row.AtRiskByPolicy;
+  const isAtRisk = !isDropped && !!row.AtRiskByPolicy;
   const preFinalRaw = (
     Number(row.Quiz1 ?? 0) +
     Number(row.Quiz2 ?? 0) +
@@ -199,14 +199,14 @@ export function GradebookTable({
               <tr>
                 <th className="px-6 py-3 font-medium sticky left-0 bg-bg z-10 border-r border-border min-w-[200px]">Student</th>
                 {preFinalColumns.map((c) => (
-                  <th key={c.key} className="px-4 py-3 font-medium text-right">{c.label}</th>
+                  <th key={c.key} className="px-4 py-3 font-medium text-center">{c.label}</th>
                 ))}
-                <th className="px-4 py-3 font-medium text-right">Abs (hrs)</th>
-                <th className="px-4 py-3 font-medium text-right text-primary">Pre-Final /50</th>
+                <th className="px-4 py-3 font-medium text-center">Abs (hrs)</th>
+                <th className="px-4 py-3 font-medium text-center text-primary">Pre-Final /50</th>
                 {finalColumns.map((c) => (
-                  <th key={c.key} className="px-4 py-3 font-medium text-right">{c.label}</th>
+                  <th key={c.key} className="px-4 py-3 font-medium text-center">{c.label}</th>
                 ))}
-                <th className="px-4 py-3 font-medium text-right font-bold">Total /100</th>
+                <th className="px-4 py-3 font-medium text-center font-bold">Total /100</th>
                 <th className="px-4 py-3 font-medium text-center">Status</th>
                 <th className="px-6 py-3 text-right">Actions</th>
               </tr>
@@ -240,10 +240,10 @@ export function GradebookTable({
                       const val = isEditing ? gradeEditor.values[editorField] : (row[c.key] ?? "-");
                       const isFailed = !isEditing && val !== "-" && c.max && Number(val) < c.max / 2;
                       return (
-                        <td key={c.key} className={`px-4 py-3 text-right font-mono ${isFailed ? 'text-red-500 font-bold' : 'text-secondary'}`}>
+                        <td key={c.key} className={`px-4 py-3 text-center font-mono ${isFailed ? 'text-red-500 font-bold' : 'text-secondary'}`}>
                           {isEditing ? (
                             <input type="number" step="0.1" min="0" max={c.max || 100}
-                              className="ui-input w-20 text-right font-mono"
+                              className="ui-input w-20 text-center font-mono"
                               value={val}
                               onChange={(e) => updateGradeDraftField(editorField, e.target.value)}
                               disabled={isSaving} />
@@ -252,10 +252,10 @@ export function GradebookTable({
                       );
                     })}
 
-                    <td className={`px-4 py-3 text-right font-mono text-sm ${isDropped ? 'text-red-500 font-bold' : isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'}`}>
+                    <td className={`px-4 py-3 text-center font-mono text-sm ${isDropped ? 'text-red-500 font-bold' : isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'}`}>
                       {isEditing ? (
                         <input type="number" step="1" min="0"
-                          className="ui-input w-16 text-right font-mono"
+                          className="ui-input w-16 text-center font-mono"
                           value={gradeEditor.values.hours_absent}
                           onChange={(e) => updateGradeDraftField("hours_absent", e.target.value)}
                           disabled={isSaving} />
@@ -264,7 +264,7 @@ export function GradebookTable({
                       )}
                     </td>
 
-                    <td className={`px-4 py-3 text-right font-mono ${Number(preFinal50) < 25 ? 'text-red-500 font-bold' : 'text-secondary'}`}>
+                    <td className={`px-4 py-3 text-center font-mono ${Number(preFinal50) < 25 ? 'text-red-500 font-bold' : 'text-secondary'}`}>
                       {preFinal50}
                     </td>
 
@@ -273,10 +273,10 @@ export function GradebookTable({
                       const val = isEditing ? gradeEditor.values[editorField] : (row[c.key] ?? "-");
                       const isFailed = !isEditing && val !== "-" && c.max && Number(val) < c.max / 2;
                       return (
-                        <td key={c.key} className={`px-4 py-3 text-right font-mono ${isFailed ? 'text-red-500 font-bold' : 'text-secondary'}`}>
+                        <td key={c.key} className={`px-4 py-3 text-center font-mono ${isFailed ? 'text-red-500 font-bold' : 'text-secondary'}`}>
                           {isEditing ? (
                             <input type="number" step="0.1" min="0" max={c.max || 100}
-                              className="ui-input w-20 text-right font-mono"
+                              className="ui-input w-20 text-center font-mono"
                               value={val}
                               onChange={(e) => updateGradeDraftField(editorField, e.target.value)}
                               disabled={isSaving} />
@@ -285,7 +285,7 @@ export function GradebookTable({
                       );
                     })}
 
-                    <td className={`px-4 py-3 text-right font-mono font-bold ${Number(total100) < 50 ? 'text-red-500' : 'text-primary'}`}>
+                    <td className={`px-4 py-3 text-center font-mono font-bold ${Number(total100) < 50 ? 'text-red-500' : 'text-primary'}`}>
                       {total100}
                     </td>
 

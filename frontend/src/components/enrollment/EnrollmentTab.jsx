@@ -110,7 +110,6 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-fg truncate">{student.FullName}</p>
-                      <p className="text-[11px] text-secondary font-mono">{student.StudentCode}</p>
                     </div>
                   </div>
 
@@ -126,7 +125,7 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                     )}
                     <button
                       onClick={() => onEnrollStudent(student.StudentID, student.FullName)}
-                      className={`px-3 py-1.5 rounded-sm text-xs font-medium transition-all cursor-pointer ${
+                      className={`w-24 py-1.5 rounded-sm text-xs font-medium transition-all cursor-pointer ${
                         enrolled
                           ? 'border border-border text-secondary hover:text-fg hover:bg-surface'
                           : 'bg-fg text-bg hover:opacity-80'

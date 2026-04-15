@@ -69,5 +69,10 @@ class Settings:
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
 
+    # WebAuthn
+    webauthn_rp_id: str = os.getenv("WEBAUTHN_RP_ID", "app.shakomba.org")
+    webauthn_rp_name: str = os.getenv("WEBAUTHN_RP_NAME", "Attendance System")
+    webauthn_origin: str = os.getenv("WEBAUTHN_ORIGIN", "https://app.shakomba.org")
+
 
 settings = Settings()

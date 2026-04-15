@@ -40,12 +40,12 @@ class FinalizeSessionResponse(BaseModel):
 
 
 class GradeUpdateRequest(BaseModel):
-    quiz1: float = Field(ge=0, le=100)
-    quiz2: float = Field(ge=0, le=100)
-    project: float = Field(ge=0, le=100)
-    assignment: float = Field(ge=0, le=100)
-    midterm: float = Field(ge=0, le=100)
-    final_exam: float = Field(ge=0, le=100)
+    quiz1: Optional[float] = Field(default=None, ge=0, le=100)
+    quiz2: Optional[float] = Field(default=None, ge=0, le=100)
+    project: Optional[float] = Field(default=None, ge=0, le=100)
+    assignment: Optional[float] = Field(default=None, ge=0, le=100)
+    midterm: Optional[float] = Field(default=None, ge=0, le=100)
+    final_exam: Optional[float] = Field(default=None, ge=0, le=100)
     hours_absent_total: Optional[float] = Field(default=None, ge=0)
 
 

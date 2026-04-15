@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils'
-import { LayoutDashboard, BookOpen, Mail, UserCheck, ScanFace, Sun, Moon, LogOut, User, History } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Mail, UserCheck, ScanFace, LogOut, User, History, Settings } from 'lucide-react'
 
 const NAV_TABS = [
     { id: 'dashboard',  icon: LayoutDashboard, label: 'Monitor',    title: 'Live Monitor' },
@@ -9,7 +9,7 @@ const NAV_TABS = [
     { id: 'history',    icon: History,         label: 'History',    title: 'Lecture History' },
 ]
 
-export function DashboardLayout({ children, activeTab, setActiveTab, theme, onToggleTheme, professor, onLogout, headerAction }) {
+export function DashboardLayout({ children, activeTab, setActiveTab, professor, onLogout, headerAction }) {
     return (
         <div className="flex min-h-screen bg-bg text-fg font-sans">
 
@@ -40,13 +40,17 @@ export function DashboardLayout({ children, activeTab, setActiveTab, theme, onTo
 
                     <div className="mt-auto pt-4 border-t border-border space-y-1">
                         <button
-                            type="button"
-                            onClick={() => onToggleTheme?.()}
-                            className="flex items-center justify-start gap-3 px-3 py-2 rounded-sm font-medium transition-colors duration-200 w-full text-secondary hover:bg-surface hover:text-fg cursor-pointer"
-                            title="Toggle Theme"
+                            onClick={() => setActiveTab('settings')}
+                            className={cn(
+                                "flex items-center justify-start gap-3 px-3 py-2 rounded-sm font-medium transition-colors duration-200 w-full cursor-pointer",
+                                activeTab === 'settings'
+                                    ? "bg-fg text-bg"
+                                    : "text-secondary hover:bg-surface hover:text-fg"
+                            )}
+                            title="Settings"
                         >
-                            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                            <span className="text-sm">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                            <Settings size={18} />
+                            <span className="text-sm">Settings</span>
                         </button>
                         {onLogout && (
                             <button
@@ -73,15 +77,14 @@ export function DashboardLayout({ children, activeTab, setActiveTab, theme, onTo
                         </div>
                         <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-4">
                             {headerAction}
-                            {/* Theme + logout — mobile only (sidebar handles these on desktop) */}
+                            {/* Settings + logout — mobile only (sidebar handles these on desktop) */}
                             <div className="flex items-center lg:hidden">
                                 <button
-                                    type="button"
-                                    onClick={() => onToggleTheme?.()}
+                                    onClick={() => setActiveTab('settings')}
                                     className="p-2 text-secondary hover:text-fg transition-colors cursor-pointer"
-                                    title="Toggle Theme"
+                                    title="Settings"
                                 >
-                                    {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                                    <Settings size={16} />
                                 </button>
                                 {onLogout && (
                                     <button

@@ -17,6 +17,7 @@ import { EmailPanel } from "./components/dashboard/EmailPanel";
 import { SessionHistory } from "./components/dashboard/SessionHistory";
 import { EnrollmentModal } from "./components/enrollment/EnrollmentModal";
 import { EnrollmentTab } from "./components/enrollment/EnrollmentTab";
+import { SettingsTab } from "./components/SettingsTab";
 
 // Cover: scale to fill the target, cropping the overflow (no black bars)
 function coverRect(sourceW, sourceH, targetW, targetH) {
@@ -37,19 +38,21 @@ function coverRect(sourceW, sourceH, targetW, targetH) {
 }
 
 function parseGradeValue(value) {
+  if (value === "" || value == null) return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? n : null;
 }
 
 function gradeDraftFromRow(row) {
+  const fmtGrade = (v) => v == null ? "" : Number(v).toFixed(2);
   return {
-    quiz1: Number(row.Quiz1 ?? 0).toFixed(2),
-    quiz2: Number(row.Quiz2 ?? 0).toFixed(2),
-    project: Number(row.ProjectGrade ?? 0).toFixed(2),
-    assignment: Number(row.AssignmentGrade ?? 0).toFixed(2),
-    midterm: Number(row.MidtermGrade ?? 0).toFixed(2),
+    quiz1: fmtGrade(row.Quiz1),
+    quiz2: fmtGrade(row.Quiz2),
+    project: fmtGrade(row.ProjectGrade),
+    assignment: fmtGrade(row.AssignmentGrade),
+    midterm: fmtGrade(row.MidtermGrade),
     // Preserved but not shown in the edit UI — keeps the DB value intact on save
-    final_exam: Number(row.FinalExamGrade ?? 0).toFixed(2),
+    final_exam: fmtGrade(row.FinalExamGrade),
     hours_absent: Number(row.HoursAbsentTotal ?? 0).toFixed(1),
   };
 }
@@ -72,6 +75,21 @@ export default function App() {
       ? "dark"
       : "light";
   });
+
+  const [language, setLanguage] = useState(() => localStorage.getItem("ams_language") || "en");
+  const handleChangeLanguage = useCallback((lang) => {
+    setLanguage(lang);
+    localStorage.setItem("ams_language", lang);
+  }, []);
+
+  const [sendEmailsOnFinalize, setSendEmailsOnFinalize] = useState(() => {
+    const saved = localStorage.getItem("ams_send_emails_on_finalize");
+    return saved === null ? true : saved === "true";
+  });
+  const handleToggleSendEmails = useCallback((val) => {
+    setSendEmailsOnFinalize(val);
+    localStorage.setItem("ams_send_emails_on_finalize", String(val));
+  }, []);
 
   const [professor, setProfessor] = useState(() => {
     try {
@@ -477,11 +495,13 @@ export default function App() {
   const handleFinalizeSession = async () => {
     try {
       const endedAt = new Date();
-      const result = await apiFinalizeSession();
+      const result = await apiFinalizeSession(sendEmailsOnFinalize);
       setSessionEndTime(endedAt);
       appendEvent(
         "success",
-        `Lecture ended at ${endedAt.toLocaleTimeString()}. Emails sent=${result?.emails_sent}, failed=${result?.email_failures}`,
+        sendEmailsOnFinalize
+          ? `Lecture ended at ${endedAt.toLocaleTimeString()}. Absence emails queued.`
+          : `Lecture ended at ${endedAt.toLocaleTimeString()}. Email notifications are disabled.`,
       );
       await Promise.all([loadGradebook(), refreshAttendance()]);
       stopCamera();
@@ -573,8 +593,6 @@ export default function App() {
     <DashboardLayout
       activeTab={activeTab}
       setActiveTab={setActiveTab}
-      theme={theme}
-      onToggleTheme={toggleTheme}
       professor={professor}
       onLogout={handleLogout}
       headerAction={
@@ -689,6 +707,18 @@ export default function App() {
             <SessionHistory apiFetch={apiFetch} courseId={courseId} activeSessionId={sessionId} />
           </div>
         </div>
+      ) : activeTab === 'settings' ? (
+        <SettingsTab
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          language={language}
+          onChangeLanguage={handleChangeLanguage}
+          sendEmailsOnFinalize={sendEmailsOnFinalize}
+          onToggleSendEmails={handleToggleSendEmails}
+          apiFetch={apiFetch}
+          courseId={courseId}
+          onReset={() => { loadGradebook(); refreshAttendance(); }}
+        />
       ) : null}
       <video ref={videoWorkerRef} style={{ display: "none" }} playsInline />
       <canvas ref={captureCanvasRef} style={{ display: "none" }} />

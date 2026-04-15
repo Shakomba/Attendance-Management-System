@@ -686,6 +686,113 @@ class Repository:
         return result
 
     @staticmethod
+    def reset_course_data(course_id: int) -> None:
+        """Null out grades, zero absences, and delete all session history for a course."""
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 1. NULL grade columns, zero absence hours for every enrolled student
+            cursor.execute(
+                """
+                UPDATE dbo.Enrollments
+                SET Quiz1 = NULL, Quiz2 = NULL, ProjectGrade = NULL,
+                    AssignmentGrade = NULL, MidtermGrade = NULL, FinalExamGrade = NULL,
+                    HoursAbsentTotal = 0, UpdatedAt = SYSUTCDATETIME()
+                WHERE CourseID = ?;
+                """,
+                (course_id,),
+            )
+            # 2. Collect session IDs for this course
+            cursor.execute(
+                "SELECT SessionID FROM dbo.ClassSessions WHERE CourseID = ?;",
+                (course_id,),
+            )
+            session_ids = [str(row[0]) for row in cursor.fetchall()]
+            # 3. Delete child rows then sessions
+            for sid in session_ids:
+                cursor.execute("DELETE FROM dbo.EmailDispatchLog WHERE SessionID = ?;", (sid,))
+                cursor.execute("DELETE FROM dbo.SessionHourLog WHERE SessionID = ?;", (sid,))
+                cursor.execute("DELETE FROM dbo.SessionRecognitions WHERE SessionID = ?;", (sid,))
+                cursor.execute("DELETE FROM dbo.SessionAttendance WHERE SessionID = ?;", (sid,))
+                cursor.execute("DELETE FROM dbo.ClassSessions WHERE SessionID = ?;", (sid,))
+            conn.commit()
+
+    # ── WebAuthn credential storage ──────────────────────────────────────────
+
+    @staticmethod
+    def ensure_webauthn_table() -> None:
+        """Create WebAuthnCredentials table if it doesn't exist."""
+        execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WebAuthnCredentials')
+            CREATE TABLE dbo.WebAuthnCredentials (
+                CredentialID   NVARCHAR(512)  NOT NULL PRIMARY KEY,
+                ProfessorID    INT            NOT NULL,
+                PublicKey      VARBINARY(MAX) NOT NULL,
+                SignCount      INT            NOT NULL DEFAULT 0,
+                DeviceName     NVARCHAR(100)  NULL,
+                CreatedAt      DATETIME2(0)   NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        """)
+
+    @staticmethod
+    def list_webauthn_credentials(professor_id: int) -> List[Dict[str, Any]]:
+        return fetch_all(
+            "SELECT CredentialID, DeviceName, CreatedAt FROM dbo.WebAuthnCredentials WHERE ProfessorID = ? ORDER BY CreatedAt;",
+            (professor_id,),
+        )
+
+    @staticmethod
+    def get_webauthn_credentials_for_professor(professor_id: int) -> List[Dict[str, Any]]:
+        return fetch_all(
+            "SELECT CredentialID, PublicKey, SignCount FROM dbo.WebAuthnCredentials WHERE ProfessorID = ?;",
+            (professor_id,),
+        )
+
+    @staticmethod
+    def get_professor_by_username(username: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID,
+                   c.CourseName, c.CourseCode
+            FROM dbo.Professors p
+            JOIN dbo.Courses c ON c.CourseID = p.CourseID
+            WHERE p.Username = ? AND p.IsActive = 1;
+            """,
+            (username,),
+        )
+
+    @staticmethod
+    def get_webauthn_credential_by_id(credential_id: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            "SELECT CredentialID, ProfessorID, PublicKey, SignCount FROM dbo.WebAuthnCredentials WHERE CredentialID = ?;",
+            (credential_id,),
+        )
+
+    @staticmethod
+    def save_webauthn_credential(professor_id: int, credential_id: str, public_key: bytes, sign_count: int, device_name: str) -> None:
+        execute(
+            "INSERT INTO dbo.WebAuthnCredentials (CredentialID, ProfessorID, PublicKey, SignCount, DeviceName) VALUES (?, ?, ?, ?, ?);",
+            (credential_id, professor_id, public_key, sign_count, device_name),
+        )
+
+    @staticmethod
+    def update_webauthn_sign_count(credential_id: str, new_sign_count: int) -> None:
+        execute(
+            "UPDATE dbo.WebAuthnCredentials SET SignCount = ? WHERE CredentialID = ?;",
+            (new_sign_count, credential_id),
+        )
+
+    @staticmethod
+    def delete_webauthn_credential(credential_id: str, professor_id: int) -> bool:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM dbo.WebAuthnCredentials WHERE CredentialID = ? AND ProfessorID = ?;",
+                (credential_id, professor_id),
+            )
+            deleted = cursor.rowcount > 0
+            conn.commit()
+        return deleted
+
     def insert_email_log(
         session_id: str,
         student_id: int,
