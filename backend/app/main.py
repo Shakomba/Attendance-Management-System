@@ -3,6 +3,7 @@ import base64
 import csv
 import io
 import json
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -164,6 +165,48 @@ def login(request: Request, payload: LoginRequest) -> LoginResponse:
     return LoginResponse(**result, access_token=token)
 
 
+# ── Profile update ──────────────────────────────────────────────────────────
+@app.patch("/api/auth/profile")
+def update_profile(payload: dict, professor: dict = Depends(get_current_professor)) -> LoginResponse:
+    professor_id = int(professor["sub"])
+    course_id = int(professor["course_id"])
+
+    full_name = (payload.get("full_name") or "").strip() or None
+    username = (payload.get("username") or "").strip() or None
+    course_name = (payload.get("course_name") or "").strip() or None
+    new_password = payload.get("new_password", "")
+    current_password = payload.get("current_password", "")
+
+    new_password_hash: Optional[str] = None
+    if new_password:
+        if not current_password:
+            raise HTTPException(status_code=400, detail="Current password is required to set a new password.")
+        # Verify current password
+        existing = repo.get_professor_by_username(professor["username"])
+        if not existing:
+            raise HTTPException(status_code=404, detail="Professor not found.")
+        stored_hash: str = existing.get("PasswordHash", "") or ""
+        import bcrypt as _bcrypt_mod
+        if not _bcrypt_mod.checkpw(current_password.encode(), stored_hash.encode()):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        new_password_hash = _bcrypt_mod.hashpw(new_password.encode(), _bcrypt_mod.gensalt()).decode()
+
+    result = repo.update_professor_profile(
+        professor_id=professor_id,
+        course_id=course_id,
+        full_name=full_name,
+        username=username,
+        course_name=course_name,
+        new_password_hash=new_password_hash,
+    )
+    token = create_access_token(
+        professor_id=result["professor_id"],
+        username=result["username"],
+        course_id=result["course_id"],
+    )
+    return LoginResponse(**result, access_token=token)
+
+
 # ── WebAuthn / Passkey endpoints ────────────────────────────────────────────
 
 @app.post("/api/auth/webauthn/register/begin")
@@ -202,36 +245,25 @@ def webauthn_register_complete(
 
 
 @app.post("/api/auth/webauthn/authenticate/begin")
-def webauthn_authenticate_begin(payload: dict) -> dict:
-    username = payload.get("username", "").strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="username is required.")
-    prof_row = repo.get_professor_by_username(username)
-    if not prof_row:
-        # Don't reveal whether user exists; return empty options
-        session_id, options_json = _wa.begin_authentication([])
-        return {"session_id": session_id, "options": json.loads(options_json)}
-    creds = repo.get_webauthn_credentials_for_professor(prof_row["ProfessorID"])
-    credential_ids = [
-        base64.urlsafe_b64decode(c["CredentialID"] + "==") for c in creds
-    ]
-    session_id, options_json = _wa.begin_authentication(credential_ids)
+def webauthn_authenticate_begin() -> dict:
+    # Usernameless: empty allowCredentials → browser shows its own passkey picker
+    session_id, options_json = _wa.begin_authentication([])
     return {"session_id": session_id, "options": json.loads(options_json)}
 
 
 @app.post("/api/auth/webauthn/authenticate/complete")
 def webauthn_authenticate_complete(payload: dict) -> LoginResponse:
-    username = payload.get("username", "").strip()
     session_id = payload.get("session_id", "")
     credential_json = json.dumps(payload.get("credential", {}))
+    credential_id = payload.get("credential", {}).get("id", "")
 
-    prof_row = repo.get_professor_by_username(username)
-    if not prof_row:
+    # Identify professor from the credential ID alone — no username required
+    stored = repo.get_webauthn_credential_by_id(credential_id)
+    if not stored:
         raise HTTPException(status_code=401, detail="Authentication failed.")
 
-    credential_id = payload.get("credential", {}).get("id", "")
-    stored = repo.get_webauthn_credential_by_id(credential_id)
-    if not stored or int(stored["ProfessorID"]) != int(prof_row["ProfessorID"]):
+    prof_row = repo.get_professor_by_id(int(stored["ProfessorID"]))
+    if not prof_row:
         raise HTTPException(status_code=401, detail="Authentication failed.")
 
     try:
@@ -487,7 +519,18 @@ def update_student_grades(
 
 
 _GRADE_FIELDS = ["Quiz1", "Quiz2", "ProjectGrade", "AssignmentGrade", "MidtermGrade", "FinalExamGrade", "HoursAbsentTotal"]
-_CSV_HEADERS = ["StudentID", "FullName", "Email"] + _GRADE_FIELDS
+_GRADE_CSV_HEADERS = ["StudentID", "FullName", "Email"] + _GRADE_FIELDS
+_SESSION_CSV_HEADERS = ["SessionID", "StartedAt", "EndedAt", "Status"]
+_ATTENDANCE_CSV_HEADERS = ["SessionID", "StudentID", "FullName", "IsPresent", "FirstSeenAt", "LastSeenAt"]
+
+
+def _make_csv(headers: list, rows: list) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({h: ("" if r.get(h) is None else r[h]) for h in headers})
+    return buf.getvalue()
 
 
 @app.get("/api/courses/{course_id}/gradebook/export")
@@ -496,21 +539,33 @@ def export_gradebook(
     professor: dict = Depends(get_current_professor),
 ) -> StreamingResponse:
     _require_course(professor, course_id)
-    rows = repo.get_gradebook(course_id)
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=_CSV_HEADERS, extrasaction="ignore", lineterminator="\n")
-    writer.writeheader()
-    for r in rows:
-        writer.writerow({h: ("" if r.get(h) is None else r[h]) for h in _CSV_HEADERS})
+    grades_csv = _make_csv(_GRADE_CSV_HEADERS, repo.get_gradebook(course_id))
+    sessions_csv = _make_csv(_SESSION_CSV_HEADERS, repo.export_sessions(course_id))
+    attendance_csv = _make_csv(_ATTENDANCE_CSV_HEADERS, repo.export_session_attendance(course_id))
 
-    buf.seek(0)
-    filename = f"gradebook_course_{course_id}.csv"
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("grades.csv", grades_csv)
+        zf.writestr("sessions.csv", sessions_csv)
+        zf.writestr("attendance.csv", attendance_csv)
+    zip_buf.seek(0)
+
+    filename = f"course_{course_id}_backup.zip"
     return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
+        iter([zip_buf.getvalue()]),
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _parse_grade(val: Optional[str]) -> Optional[float]:
+    if val is None or str(val).strip() == "":
+        return None
+    try:
+        return float(str(val).strip())
+    except ValueError:
+        return None
 
 
 @app.post("/api/courses/{course_id}/gradebook/import")
@@ -520,55 +575,88 @@ async def import_gradebook(
     professor: dict = Depends(get_current_professor),
 ) -> dict:
     _require_course(professor, course_id)
-    if not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are accepted.")
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".zip") or fname.endswith(".csv")):
+        raise HTTPException(status_code=400, detail="Only ZIP or CSV files are accepted.")
 
     content = await file.read()
-    try:
-        text = content.decode("utf-8-sig")  # strip BOM if present
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded.")
+    grades_updated = sessions_restored = attendance_restored = 0
+    errors: list = []
 
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames or "StudentID" not in reader.fieldnames:
-        raise HTTPException(status_code=400, detail="CSV must contain a StudentID column.")
-
-    updated, errors = 0, []
-    for i, row in enumerate(reader, start=2):  # row 1 is header
-        sid_raw = row.get("StudentID", "").strip()
-        if not sid_raw:
-            continue
-        try:
-            student_id = int(sid_raw)
-        except ValueError:
-            errors.append(f"Row {i}: invalid StudentID '{sid_raw}'")
-            continue
-
-        def _parse(val: Optional[str]) -> Optional[float]:
-            if val is None or val.strip() == "":
-                return None
+    def _process_grades(text: str) -> None:
+        nonlocal grades_updated
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames or "StudentID" not in reader.fieldnames:
+            errors.append("grades.csv: missing StudentID column")
+            return
+        for i, row in enumerate(reader, start=2):
+            sid_raw = row.get("StudentID", "").strip()
+            if not sid_raw:
+                continue
             try:
-                return float(val.strip())
+                student_id = int(sid_raw)
             except ValueError:
-                return None
+                errors.append(f"grades row {i}: invalid StudentID '{sid_raw}'")
+                continue
+            grades = {
+                "quiz1": _parse_grade(row.get("Quiz1")),
+                "quiz2": _parse_grade(row.get("Quiz2")),
+                "project": _parse_grade(row.get("ProjectGrade")),
+                "assignment": _parse_grade(row.get("AssignmentGrade")),
+                "midterm": _parse_grade(row.get("MidtermGrade")),
+                "final_exam": _parse_grade(row.get("FinalExamGrade")),
+                "hours_absent_total": _parse_grade(row.get("HoursAbsentTotal")),
+            }
+            try:
+                repo.update_student_grades(course_id, student_id, grades)
+                grades_updated += 1
+            except ValueError as exc:
+                errors.append(f"grades row {i}: {exc}")
 
-        grades = {
-            "quiz1": _parse(row.get("Quiz1")),
-            "quiz2": _parse(row.get("Quiz2")),
-            "project": _parse(row.get("ProjectGrade")),
-            "assignment": _parse(row.get("AssignmentGrade")),
-            "midterm": _parse(row.get("MidtermGrade")),
-            "final_exam": _parse(row.get("FinalExamGrade")),
-            "hours_absent_total": _parse(row.get("HoursAbsentTotal")),
-        }
+    def _process_sessions(text: str) -> None:
+        nonlocal sessions_restored
+        reader = csv.DictReader(io.StringIO(text))
+        sessions_restored = repo.bulk_restore_sessions(course_id, list(reader))
 
+    def _process_attendance(text: str) -> None:
+        nonlocal attendance_restored
+        reader = csv.DictReader(io.StringIO(text))
+        attendance_restored = repo.bulk_restore_attendance(list(reader))
+
+    if fname.endswith(".zip"):
         try:
-            repo.update_student_grades(course_id, student_id, grades)
-            updated += 1
-        except ValueError as exc:
-            errors.append(f"Row {i} (StudentID {student_id}): {exc}")
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                names = zf.namelist()
+                if "sessions.csv" in names:
+                    _process_sessions(zf.read("sessions.csv").decode("utf-8-sig"))
+                if "attendance.csv" in names:
+                    _process_attendance(zf.read("attendance.csv").decode("utf-8-sig"))
+                if "grades.csv" in names:
+                    _process_grades(zf.read("grades.csv").decode("utf-8-sig"))
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid ZIP file.")
+    else:
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded.")
+        first_line = text.split("\n")[0] if text else ""
+        detected_headers = {h.strip() for h in first_line.split(",")}
+        if "SessionID" in detected_headers or "IsPresent" in detected_headers:
+            raise HTTPException(
+                status_code=400,
+                detail="This looks like a sessions or attendance CSV. Upload the full ZIP backup to restore session history.",
+            )
+        if "StudentID" not in detected_headers:
+            raise HTTPException(status_code=400, detail="Unrecognised CSV format. Expected a grades file with a StudentID column.")
+        _process_grades(text)
 
-    return {"updated": updated, "errors": errors}
+    return {
+        "grades_updated": grades_updated,
+        "sessions_restored": sessions_restored,
+        "attendance_restored": attendance_restored,
+        "errors": errors,
+    }
 
 
 @app.post("/api/sessions/start", response_model=StartSessionResponse)

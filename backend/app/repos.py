@@ -41,6 +41,48 @@ class Repository:
         }
 
     @staticmethod
+    def update_professor_profile(
+        professor_id: int,
+        course_id: int,
+        full_name: Optional[str],
+        username: Optional[str],
+        course_name: Optional[str],
+        new_password_hash: Optional[str],
+    ) -> Dict[str, Any]:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if full_name or username or new_password_hash:
+                parts, params = [], []
+                if full_name:
+                    parts.append("FullName = ?"); params.append(full_name)
+                if username:
+                    parts.append("Username = ?"); params.append(username)
+                if new_password_hash:
+                    parts.append("PasswordHash = ?"); params.append(new_password_hash)
+                params.append(professor_id)
+                cursor.execute(f"UPDATE dbo.Professors SET {', '.join(parts)} WHERE ProfessorID = ?", params)
+            if course_name:
+                cursor.execute("UPDATE dbo.Courses SET CourseName = ? WHERE CourseID = ?", [course_name, course_id])
+            conn.commit()
+        row = fetch_one(
+            """
+            SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID, c.CourseName, c.CourseCode
+            FROM dbo.Professors p
+            INNER JOIN dbo.Courses c ON c.CourseID = p.CourseID
+            WHERE p.ProfessorID = ?;
+            """,
+            (professor_id,),
+        )
+        return {
+            "professor_id": row["ProfessorID"],
+            "username": row["Username"],
+            "full_name": row["FullName"],
+            "course_id": row["CourseID"],
+            "course_name": row["CourseName"],
+            "course_code": row["CourseCode"],
+        }
+
+    @staticmethod
     def healthcheck() -> Dict[str, Any]:
         row = fetch_one("SELECT DB_NAME() AS DbName, SYSUTCDATETIME() AS UtcNow;")
         return row or {"DbName": "unknown", "UtcNow": None}
@@ -685,6 +727,93 @@ class Repository:
 
         return result
 
+    # ── Export / Import helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def export_sessions(course_id: int) -> List[Dict[str, Any]]:
+        return fetch_all(
+            """
+            SELECT CAST(SessionID AS NVARCHAR(36)) AS SessionID,
+                   StartedAt, EndedAt, Status
+            FROM dbo.ClassSessions
+            WHERE CourseID = ?
+            ORDER BY StartedAt;
+            """,
+            (course_id,),
+        )
+
+    @staticmethod
+    def export_session_attendance(course_id: int) -> List[Dict[str, Any]]:
+        return fetch_all(
+            """
+            SELECT CAST(sa.SessionID AS NVARCHAR(36)) AS SessionID,
+                   sa.StudentID,
+                   s.FullName,
+                   sa.IsPresent,
+                   sa.FirstSeenAt,
+                   sa.LastSeenAt
+            FROM dbo.SessionAttendance sa
+            JOIN dbo.ClassSessions cs ON cs.SessionID = sa.SessionID
+            JOIN dbo.Students s ON s.StudentID = sa.StudentID
+            WHERE cs.CourseID = ?
+            ORDER BY sa.SessionID, s.FullName;
+            """,
+            (course_id,),
+        )
+
+    @staticmethod
+    def bulk_restore_sessions(course_id: int, sessions: List[Dict[str, Any]]) -> int:
+        count = 0
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            for s in sessions:
+                sid = s.get("SessionID", "").strip()
+                if not sid:
+                    continue
+                started = s.get("StartedAt") or None
+                ended = s.get("EndedAt") or None
+                status = s.get("Status") or "finalized"
+                cursor.execute(
+                    """
+                    IF NOT EXISTS (SELECT 1 FROM dbo.ClassSessions WHERE SessionID = ?)
+                    BEGIN
+                        INSERT INTO dbo.ClassSessions (SessionID, CourseID, StartedAt, EndedAt, Status)
+                        VALUES (?, ?, ?, ?, ?);
+                        INSERT INTO dbo.SessionAttendance (SessionID, StudentID, IsPresent)
+                            SELECT ?, StudentID, 0 FROM dbo.Enrollments WHERE CourseID = ?;
+                    END
+                    """,
+                    (sid, sid, course_id, started, ended, status, sid, course_id),
+                )
+                count += 1
+            conn.commit()
+        return count
+
+    @staticmethod
+    def bulk_restore_attendance(records: List[Dict[str, Any]]) -> int:
+        count = 0
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            for r in records:
+                sid = r.get("SessionID", "").strip()
+                student_id = r.get("StudentID", "")
+                if not sid or not student_id:
+                    continue
+                is_present = 1 if str(r.get("IsPresent", "0")).strip().lower() in ("1", "true", "yes") else 0
+                first_seen = r.get("FirstSeenAt") or None
+                last_seen = r.get("LastSeenAt") or None
+                cursor.execute(
+                    """
+                    UPDATE dbo.SessionAttendance
+                    SET IsPresent=?, FirstSeenAt=?, LastSeenAt=?
+                    WHERE SessionID=? AND StudentID=?;
+                    """,
+                    (is_present, first_seen, last_seen, sid, int(student_id)),
+                )
+                count += cursor.rowcount
+            conn.commit()
+        return count
+
     @staticmethod
     def reset_course_data(course_id: int) -> None:
         """Null out grades, zero absences, and delete all session history for a course."""
@@ -748,11 +877,24 @@ class Repository:
         )
 
     @staticmethod
-    def get_professor_by_username(username: str) -> Optional[Dict[str, Any]]:
+    def get_professor_by_id(professor_id: int) -> Optional[Dict[str, Any]]:
         return fetch_one(
             """
             SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID,
                    c.CourseName, c.CourseCode
+            FROM dbo.Professors p
+            JOIN dbo.Courses c ON c.CourseID = p.CourseID
+            WHERE p.ProfessorID = ? AND p.IsActive = 1;
+            """,
+            (professor_id,),
+        )
+
+    @staticmethod
+    def get_professor_by_username(username: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT p.ProfessorID, p.Username, p.FullName, p.CourseID,
+                   p.PasswordHash, c.CourseName, c.CourseCode
             FROM dbo.Professors p
             JOIN dbo.Courses c ON c.CourseID = p.CourseID
             WHERE p.Username = ? AND p.IsActive = 1;

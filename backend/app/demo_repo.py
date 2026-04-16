@@ -364,6 +364,40 @@ class DemoRepository:
             "course_code": course["CourseCode"] if course else None,
         }
 
+    def update_professor_profile(
+        self,
+        professor_id: int,
+        course_id: int,
+        full_name: Optional[str],
+        username: Optional[str],
+        course_name: Optional[str],
+        new_password_hash: Optional[str],
+    ) -> Dict[str, Any]:
+        # Find the professor entry (keyed by old username)
+        prof = next((p for p in self.professors.values() if p["ProfessorID"] == professor_id), None)
+        if not prof:
+            raise ValueError("Professor not found")
+        old_username = prof["Username"]
+        if full_name:
+            prof["FullName"] = full_name
+        if username and username != old_username:
+            prof["Username"] = username
+            self.professors[username] = prof
+            del self.professors[old_username]
+        if new_password_hash:
+            prof["PasswordHash"] = new_password_hash
+        if course_name and course_id in self.courses:
+            self.courses[course_id]["CourseName"] = course_name
+        course = self.courses.get(prof["CourseID"], {})
+        return {
+            "professor_id": prof["ProfessorID"],
+            "username": prof["Username"],
+            "full_name": prof["FullName"],
+            "course_id": prof["CourseID"],
+            "course_name": course.get("CourseName"),
+            "course_code": course.get("CourseCode"),
+        }
+
     def healthcheck(self) -> Dict[str, Any]:
         return {"DbName": "DEMO_MODE", "UtcNow": self._utcnow()}
 
@@ -967,6 +1001,87 @@ class DemoRepository:
         rows.sort(key=lambda row: row["FullName"])
         return rows
 
+    # ── Export / Import helpers ──────────────────────────────────────────────
+
+    def export_sessions(self, course_id: int) -> List[Dict[str, Any]]:
+        return [
+            {
+                "SessionID": sid,
+                "StartedAt": s["StartedAt"],
+                "EndedAt": s.get("EndedAt"),
+                "Status": s.get("Status", "finalized"),
+            }
+            for sid, s in self.sessions.items()
+            if s.get("CourseID") == course_id
+        ]
+
+    def export_session_attendance(self, course_id: int) -> List[Dict[str, Any]]:
+        rows = []
+        for (sid, student_id), att in self.session_attendance.items():
+            session = self.sessions.get(sid)
+            if not session or session.get("CourseID") != course_id:
+                continue
+            student = self.students.get(student_id, {})
+            rows.append({
+                "SessionID": sid,
+                "StudentID": student_id,
+                "FullName": student.get("FullName", ""),
+                "IsPresent": 1 if att.get("IsPresent") else 0,
+                "FirstSeenAt": att.get("FirstSeenAt"),
+                "LastSeenAt": att.get("LastSeenAt"),
+            })
+        rows.sort(key=lambda r: (str(r["SessionID"]), str(r["FullName"])))
+        return rows
+
+    def bulk_restore_sessions(self, course_id: int, sessions: List[Dict[str, Any]]) -> int:
+        count = 0
+        for s in sessions:
+            sid = str(s.get("SessionID", "")).strip()
+            if not sid or sid in self.sessions:
+                continue
+            self.sessions[sid] = {
+                "SessionID": sid,
+                "CourseID": course_id,
+                "StartedAt": s.get("StartedAt"),
+                "EndedAt": s.get("EndedAt") or None,
+                "Status": s.get("Status") or "finalized",
+            }
+            # create blank attendance rows for all enrolled students
+            for (student_id, cid) in self.enrollments:
+                if cid == course_id:
+                    self.session_attendance[(sid, student_id)] = {
+                        "IsPresent": False,
+                        "FirstSeenAt": None,
+                        "LastSeenAt": None,
+                    }
+            count += 1
+        self._save_state()
+        return count
+
+    def bulk_restore_attendance(self, records: List[Dict[str, Any]]) -> int:
+        count = 0
+        for r in records:
+            sid = str(r.get("SessionID", "")).strip()
+            student_id_raw = r.get("StudentID", "")
+            if not sid or not student_id_raw:
+                continue
+            try:
+                student_id = int(student_id_raw)
+            except (ValueError, TypeError):
+                continue
+            key = (sid, student_id)
+            if key not in self.session_attendance:
+                continue
+            is_present = str(r.get("IsPresent", "0")).strip().lower() in ("1", "true", "yes")
+            self.session_attendance[key].update({
+                "IsPresent": is_present,
+                "FirstSeenAt": r.get("FirstSeenAt") or None,
+                "LastSeenAt": r.get("LastSeenAt") or None,
+            })
+            count += 1
+        self._save_state()
+        return count
+
     def reset_course_data(self, course_id: int) -> None:
         """Null out grades, zero absences, and delete all session history for a course."""
         for enrollment in self._enrollments.values():
@@ -1004,6 +1119,20 @@ class DemoRepository:
             for c in self._webauthn_credentials if c["professor_id"] == professor_id
         ]
 
+    def get_professor_by_id(self, professor_id: int) -> Optional[Dict[str, Any]]:
+        for prof in self.professors.values():
+            if prof["ProfessorID"] == professor_id and prof.get("IsActive"):
+                course = self.courses.get(prof["CourseID"], {})
+                return {
+                    "ProfessorID": prof["ProfessorID"],
+                    "Username": prof["Username"],
+                    "FullName": prof["FullName"],
+                    "CourseID": prof["CourseID"],
+                    "CourseName": course.get("CourseName", ""),
+                    "CourseCode": course.get("CourseCode", ""),
+                }
+        return None
+
     def get_professor_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         prof = self.professors.get(username)
         if not prof or not prof.get("IsActive"):
@@ -1013,6 +1142,7 @@ class DemoRepository:
             "ProfessorID": prof["ProfessorID"],
             "Username": prof["Username"],
             "FullName": prof["FullName"],
+            "PasswordHash": prof.get("PasswordHash", ""),
             "CourseID": prof["CourseID"],
             "CourseName": course.get("CourseName", ""),
             "CourseCode": course.get("CourseCode", ""),

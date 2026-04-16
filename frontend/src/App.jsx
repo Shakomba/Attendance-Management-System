@@ -717,6 +717,8 @@ export default function App() {
           onToggleSendEmails={handleToggleSendEmails}
           apiFetch={apiFetch}
           courseId={courseId}
+          professor={professor}
+          onProfileUpdate={handleLogin}
           onReset={() => { loadGradebook(); refreshAttendance(); }}
         />
       ) : null}

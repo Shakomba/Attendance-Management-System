@@ -23,3 +23,5 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends gnupg curl 
   && rm -rf /var/lib/apt/lists/* /tmp/ms.asc
 
 ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:/usr/local/cuda/lib64
+
+RUN pip install --no-cache-dir webauthn==2.7.1

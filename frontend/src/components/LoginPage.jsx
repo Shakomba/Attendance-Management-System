@@ -87,33 +87,26 @@ export function LoginPage({ apiBase, onLogin }) {
     }
 
     const handleBiometric = async () => {
-        if (!username.trim()) {
-            setError('Enter your username first.')
-            return
-        }
         setError('')
         setBiometricLoading(true)
         try {
-            // 1. Get challenge from server
+            // 1. Get challenge — no username needed, browser will show passkey picker
             const beginRes = await fetch(`${base}/api/auth/webauthn/authenticate/begin`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username }),
             })
             const beginData = await beginRes.json()
             if (!beginRes.ok) throw new Error(beginData?.detail || 'Failed to start biometric login')
 
-            // 2. Prompt browser for biometric
+            // 2. Browser shows its own passkey picker (no username needed)
             const assertion = await navigator.credentials.get({
                 publicKey: decodeOptions(beginData.options),
             })
 
-            // 3. Send response to server
+            // 3. Server identifies professor from credential ID alone
             const completeRes = await fetch(`${base}/api/auth/webauthn/authenticate/complete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    username,
                     session_id: beginData.session_id,
                     credential: encodeAssertion(assertion),
                 }),
@@ -124,8 +117,8 @@ export function LoginPage({ apiBase, onLogin }) {
         } catch (err) {
             if (err.name === 'NotAllowedError') {
                 setError('Biometric prompt was dismissed.')
-            } else if (err.name === 'InvalidStateError') {
-                setError('No passkey registered for this account.')
+            } else if (err.name === 'NotSupportedError' || err.name === 'InvalidStateError') {
+                setError('No passkey found. Register one in Settings first.')
             } else {
                 setError(err.message || 'Biometric login failed.')
             }
@@ -146,63 +139,62 @@ export function LoginPage({ apiBase, onLogin }) {
                     </div>
                 </div>
 
-                <form
-                    onSubmit={handleSubmit}
-                    className="bg-surface border border-border rounded-sm shadow-sm p-6 space-y-5"
-                >
+                <div className="bg-surface border border-border rounded-sm shadow-sm p-6 space-y-5">
                     {error && (
                         <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-sm px-3 py-2.5">
                             {error}
                         </div>
                     )}
 
-                    <div>
-                        <label className="block text-sm font-medium text-fg mb-1.5">
-                            Username
-                        </label>
-                        <input
-                            type="text"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            className="ui-input w-full"
-                            placeholder="Enter your username"
-                            required
-                            autoFocus
-                            autoComplete="username"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-fg mb-1.5">
-                            Password
-                        </label>
-                        <div className="relative">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-fg mb-1.5">
+                                Username
+                            </label>
                             <input
-                                type={showPassword ? 'text' : 'password'}
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="ui-input w-full pr-10"
-                                placeholder="Enter your password"
-                                autoComplete="current-password"
+                                type="text"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                className="ui-input w-full"
+                                placeholder="Enter your username"
+                                required
+                                autoFocus
+                                autoComplete="username"
                             />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword((v) => !v)}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors"
-                                tabIndex={-1}
-                            >
-                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                            </button>
                         </div>
-                    </div>
 
-                    <button
-                        type="submit"
-                        disabled={loading || !username || !password}
-                        className="btn-primary w-full h-10"
-                    >
-                        {loading ? 'Signing in\u2026' : 'Sign In'}
-                    </button>
+                        <div>
+                            <label className="block text-sm font-medium text-fg mb-1.5">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="ui-input w-full pr-10"
+                                    placeholder="Enter your password"
+                                    autoComplete="current-password"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((v) => !v)}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors"
+                                    tabIndex={-1}
+                                >
+                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={loading || !username || !password}
+                            className="btn-primary w-full h-10"
+                        >
+                            {loading ? 'Signing in\u2026' : 'Sign In'}
+                        </button>
+                    </form>
 
                     {webAuthnSupported && (
                         <>
@@ -214,15 +206,15 @@ export function LoginPage({ apiBase, onLogin }) {
                             <button
                                 type="button"
                                 onClick={handleBiometric}
-                                disabled={biometricLoading || !username}
-                                className="w-full h-10 flex items-center justify-center gap-2 border border-border rounded-sm text-sm font-medium text-secondary hover:text-fg hover:bg-surface transition-colors cursor-pointer disabled:opacity-40"
+                                disabled={biometricLoading}
+                                className="w-full h-10 flex items-center justify-center gap-2 border border-border rounded-sm text-sm font-medium text-secondary hover:text-fg hover:bg-fg/5 transition-colors cursor-pointer disabled:opacity-40"
                             >
                                 <Fingerprint size={16} />
                                 {biometricLoading ? 'Verifying\u2026' : 'Sign in with biometrics'}
                             </button>
                         </>
                     )}
-                </form>
+                </div>
             </div>
         </div>
     )
