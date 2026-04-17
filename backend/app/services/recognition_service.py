@@ -46,12 +46,21 @@ class ProcessFrameResult:
 
 
 # Seconds within which a student must show 2+ different matching poses.
-_POSE_LIVENESS_WINDOW_SEC = 8.0
+_POSE_LIVENESS_WINDOW_SEC = 12.0
 # Minimum number of distinct poses the face must match to be considered live.
 _POSE_LIVENESS_MIN_POSES = 2
 # Distance margin: a pose counts as "matched" if its distance is within this
 # margin of the best-matching pose distance.
-_POSE_MATCH_MARGIN = 0.0
+# A real face moving naturally will shift the dominant pose; 0.0 was too strict
+# and meant only the single closest pose ever accumulated.
+_POSE_MATCH_MARGIN = 0.08  # ~8% of typical CPU L2 distance / GPU cosine margin
+
+# Minimum embedding variance across recent frames to pass motion liveness.
+# A static photo produces near-identical embeddings every frame (variance ~0).
+# A real face has natural micro-motion giving variance > this threshold.
+_MOTION_VARIANCE_THRESHOLD = 1e-5
+# Number of consecutive frames of embedding history kept per (session, student).
+_MOTION_HISTORY_LEN = 6
 
 
 class RecognitionService:
@@ -67,6 +76,10 @@ class RecognitionService:
         # Pose-based liveness: track which pose labels matched per (session, student).
         # {(session_id, student_id): {"poses": {pose_label: last_seen_datetime}, "first_seen": datetime}}
         self._pose_observations: Dict[Tuple[str, int], Dict] = {}
+
+        # Motion liveness: track recent embedding history per (session, student).
+        # A static photo produces near-zero variance; a real face has natural micro-motion.
+        self._embedding_history: Dict[Tuple[str, int], deque] = {}
 
         # Students confirmed present this session — skip all spoof checks for them.
         # {session_id: {student_id, ...}}
@@ -182,6 +195,40 @@ class RecognitionService:
 
         # Window expired with only one pose seen — likely a photo.
         return True, False
+
+    def _check_motion_liveness(
+        self,
+        session_id: str,
+        student_id: int,
+        embedding: np.ndarray,
+    ) -> Tuple[bool, bool]:
+        """Detect static photos by checking embedding variance across recent frames.
+
+        A printed photo or phone photo produces near-identical face embeddings
+        frame after frame (variance ≈ 0). A real face always has micro-motion —
+        breathing, tiny head shifts, eye blinks — that produce measurable variance.
+
+        Returns (warmed_up, is_live):
+        - warmed_up=False: not enough frames collected yet.
+        - warmed_up=True, is_live=True: sufficient variance — real face.
+        - warmed_up=True, is_live=False: near-zero variance — likely a photo.
+        """
+        key = (session_id, student_id)
+        history = self._embedding_history.get(key)
+        if history is None:
+            history = deque(maxlen=_MOTION_HISTORY_LEN)
+            self._embedding_history[key] = history
+
+        history.append(embedding.copy())
+
+        if len(history) < _MOTION_HISTORY_LEN:
+            return False, True  # Still collecting frames.
+
+        # Stack embeddings and compute mean variance across all dimensions.
+        stack = np.stack(list(history), axis=0)  # shape: (N, D)
+        variance = float(np.var(stack, axis=0).mean())
+
+        return True, variance >= _MOTION_VARIANCE_THRESHOLD
 
     def known_face_count_for_session(self, session_id: str) -> int:
         session = self.repository.get_session(session_id)
@@ -341,6 +388,53 @@ class RecognitionService:
                             recognized_at=event_time_db,
                         )
                         continue
+
+            # ── Step 3.5: Motion liveness — embedding variance across frames ──
+            # Detects static photos: a real face has micro-motion that produces
+            # measurable embedding variance; a held-up photo does not.
+            motion_warmed, motion_live = self._check_motion_liveness(
+                session_id, match.student_id, detection.embedding
+            )
+            if not motion_warmed:
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="verifying",
+                        student_id=match.student_id,
+                        full_name=match.full_name,
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                continue
+            if not motion_live:
+                output.overlays.append(
+                    FaceOverlay(
+                        event_type="spoof",
+                        student_id=match.student_id,
+                        full_name=f"{match.full_name} (Photo)",
+                        confidence=match.best_score,
+                        left=detection.left,
+                        top=detection.top,
+                        right=detection.right,
+                        bottom=detection.bottom,
+                        engine_mode=self.face_engine.mode,
+                        session_absent_hours=absent_hours,
+                    )
+                )
+                self.repository.add_recognition_event(
+                    session_id=session_id,
+                    student_id=match.student_id,
+                    confidence=match.best_score,
+                    engine_mode=self.face_engine.mode,
+                    notes="spoof-photo:zero-motion-variance",
+                    recognized_at=event_time_db,
+                )
+                continue
 
             # ── Step 4: Multi-embedding variance check ─────────────────
             if match.is_suspicious:
