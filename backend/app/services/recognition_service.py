@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from collections import deque
 from dataclasses import dataclass, field
@@ -11,6 +12,8 @@ import numpy as np
 from ..config import settings
 from .face_engine import FaceEngine
 from .spoof_detector import SpoofDetector
+
+_log = logging.getLogger("recognition")
 
 
 @dataclass
@@ -161,6 +164,8 @@ class RecognitionService:
         elapsed = (now - obs["first_seen"]).total_seconds()
         distinct = len(obs["poses"])
 
+        _log.info("LIVENESS student=%s matched=%s accumulated=%s elapsed=%.1fs distinct=%d", key[1], matched, set(obs["poses"].keys()), elapsed, distinct)
+
         if distinct >= _POSE_LIVENESS_MIN_POSES:
             return True, True
         if elapsed < _POSE_LIVENESS_WINDOW_SEC:
@@ -250,6 +255,7 @@ class RecognitionService:
 
             # ── Step 2: Confirmed fast-path ────────────────────────────
             if match.student_id in self._confirmed_students.get(session_id, set()):
+                _log.info("FASTPATH student=%s", match.student_id)
                 output.overlays.append(FaceOverlay(
                     event_type="recognized", student_id=match.student_id,
                     full_name=match.full_name, confidence=match.best_score,
@@ -284,6 +290,7 @@ class RecognitionService:
                         continue
 
             # ── Step 4: Variance check ─────────────────────────────────
+            _log.info("VARIANCE student=%s variance=%.6f suspicious=%s", match.student_id, match.score_variance, match.is_suspicious)
             if match.is_suspicious:
                 # Also reset pose observations so a photo can't accumulate
                 # pose matches on frames that slipped past the variance check.
@@ -306,6 +313,7 @@ class RecognitionService:
 
             # ── Step 5: Pose liveness ──────────────────────────────────
             student_poses = known_grouped.get(match.student_id, [])
+            _log.info("POSECHK student=%s stored_poses=%d", match.student_id, len(student_poses))
             warmed_up, is_live = self._check_pose_liveness(
                 session_id, match.student_id, detection.embedding, student_poses,
             )
