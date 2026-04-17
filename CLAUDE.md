@@ -13,7 +13,6 @@ Attendance-Management-System/
 │   ├── config.py                # Env var configuration
 │   ├── database.py              # SQL Server connection
 │   ├── repos.py                 # SQL Server repository
-│   ├── demo_repo.py             # In-memory mock repository
 │   ├── schemas.py               # Pydantic request/response models
 │   ├── auth.py                  # JWT + WebAuthn auth
 │   ├── webauthn_service.py      # Passkey registration/verification
@@ -92,9 +91,6 @@ sqlcmd -S localhost,1433 -U sa -P <password> -i database/01_init_schema.sql
 ## Key Configuration (backend/.env)
 
 ```env
-# Use in-memory repo for local dev without SQL Server
-DEMO_MODE=true
-
 # AI mode: "cpu" or "gpu"
 AI_MODE=cpu
 CPU_DISTANCE_THRESHOLD=0.45
@@ -104,12 +100,15 @@ GPU_COSINE_THRESHOLD=0.55
 RECOGNITION_FRAME_STRIDE=8         # Process every Nth frame
 RECOGNITION_EVENT_COOLDOWN_SEC=20  # Prevent duplicate events
 
-# SQL Server (when DEMO_MODE=false)
+# SQL Server
 SQL_SERVER=localhost
 SQL_PORT=1433
 SQL_DATABASE=AttendanceAI
 SQL_USER=sa
 SQL_PASSWORD=YourStrong!Passw0rd
+
+# JWT
+JWT_SECRET_KEY=generate-with-openssl-rand-hex-64
 
 # SMTP
 SMTP_HOST=smtp.gmail.com
@@ -141,13 +140,6 @@ SMTP_DRY_RUN=true   # Set false for real emails
 ---
 
 ## Architecture Notes
-
-### Repository Pattern
-Two implementations of the same interface:
-- `repos.py` — real SQL Server queries
-- `demo_repo.py` — in-memory mock (activated by `DEMO_MODE=true`)
-
-When editing data logic, changes to one may need to be mirrored in the other.
 
 ### Face Recognition Pipeline
 1. Camera client sends binary JPEG frames over WebSocket

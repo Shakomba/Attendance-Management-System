@@ -33,7 +33,6 @@ class Settings:
     sql_password: str = os.getenv("SQL_PASSWORD", "YourStrong!Passw0rd")
     sql_trust_server_cert: bool = _as_bool(os.getenv("SQL_TRUST_SERVER_CERT", "yes"), True)
     sql_connection_string: str = os.getenv("SQL_CONNECTION_STRING", "")
-    demo_mode: bool = _as_bool(os.getenv("DEMO_MODE", "true"), True)
 
     ai_mode: str = os.getenv("AI_MODE", "cpu").strip().lower()
     cpu_face_detect_model: str = os.getenv("CPU_FACE_DETECT_MODEL", "hog").strip().lower()
