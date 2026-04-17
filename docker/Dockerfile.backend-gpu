@@ -9,9 +9,6 @@ COPY --from=cuda-provider /usr/local/cuda/lib64/ /usr/local/cuda/lib64/
 # Copy cuDNN 9 (lives in the distro lib path in runtime images)
 COPY --from=cuda-provider /usr/lib/x86_64-linux-gnu/libcudnn*.so* /usr/local/cuda/lib64/
 
-# Register WSL CUDA stub path for ldconfig (actual libs mounted at runtime via volume)
-RUN echo '/usr/lib/wsl/lib' > /etc/ld.so.conf.d/wsl-cuda.conf
-
 # Install Microsoft ODBC Driver 18 for SQL Server (required for real DB mode)
 RUN apt-get update -qq && apt-get install -y --no-install-recommends gnupg curl \
   && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc > /tmp/ms.asc \
@@ -22,6 +19,6 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends gnupg curl 
   && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
   && rm -rf /var/lib/apt/lists/* /tmp/ms.asc
 
-ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:/usr/local/cuda/lib64
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
 
 RUN pip install --no-cache-dir webauthn==2.7.1
