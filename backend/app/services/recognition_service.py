@@ -50,14 +50,14 @@ class ProcessFrameResult:
 
 # ── Pose liveness constants ───────────────────────────────────────────────────
 # Window in which a student must match 2+ distinct stored poses.
-_POSE_LIVENESS_WINDOW_SEC = 10.0
+_POSE_LIVENESS_WINDOW_SEC = 15.0
 _POSE_LIVENESS_MIN_POSES = 2
-# How much slack around the best-matching pose counts as "also matched".
-# 0.0 was too strict — only the single best pose ever accumulated so a real
-# face that moved subtly never got a second pose credited.
-# GPU cosine similarity space: 0.05 gives ~5% slack around best sim.
-# CPU L2 distance space: same constant works as an additive margin.
-_POSE_MATCH_MARGIN = 0.05
+# Only the single best-scoring pose per frame is credited.
+# A photo always best-matches the same stored pose (front).
+# A real face shifts which pose scores best as the person makes natural movements.
+# margin=0.0 means exactly one pose credited per frame — prevents multi-pose
+# accumulation in a single frame from a static image.
+_POSE_MATCH_MARGIN = 0.0
 
 
 class RecognitionService:
@@ -141,18 +141,18 @@ class RecognitionService:
             obs = {"poses": {}, "first_seen": now}
             self._pose_observations[key] = obs
 
-        # Find which stored poses this candidate is close to.
+        # Credit only the single best-matching stored pose per frame.
+        # A photo always best-matches the same pose (front). A real face shifts
+        # which pose scores best as micro-movements change the embedding.
         if self.face_engine.mode == "cpu":
             scores = [(p["pose_label"], float(np.linalg.norm(candidate - p["embedding"]))) for p in known_poses]
             scores.sort(key=lambda x: x[1])
-            best = scores[0][1]
-            matched = {lbl for lbl, d in scores if d <= best + _POSE_MATCH_MARGIN}
+            matched = {scores[0][0]}  # only the single best (lowest distance)
         else:
             cand_norm = candidate / (np.linalg.norm(candidate) + 1e-9)
             scores = [(p["pose_label"], float(np.dot(cand_norm, p["embedding"] / (np.linalg.norm(p["embedding"]) + 1e-9)))) for p in known_poses]
             scores.sort(key=lambda x: x[1], reverse=True)
-            best = scores[0][1]
-            matched = {lbl for lbl, s in scores if s >= best - _POSE_MATCH_MARGIN}
+            matched = {scores[0][0]}  # only the single best (highest similarity)
 
         for lbl in matched:
             obs["poses"][lbl] = now
