@@ -7,7 +7,7 @@ import { useDashboardSocket } from "./hooks/useDashboardSocket";
 import { useEmail } from "./hooks/useEmail";
 import { useEnrollment } from "./hooks/useEnrollment";
 
-import { LoginPage } from "./components/LoginPage";
+import { LoginPage } from "./components/auth/LoginPage";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { StatCards } from "./components/dashboard/StatCards";
 import { CameraFeed } from "./components/dashboard/CameraFeed";
@@ -17,7 +17,7 @@ import { EmailPanel } from "./components/dashboard/EmailPanel";
 import { SessionHistory } from "./components/dashboard/SessionHistory";
 import { EnrollmentModal } from "./components/enrollment/EnrollmentModal";
 import { EnrollmentTab } from "./components/enrollment/EnrollmentTab";
-import { SettingsTab } from "./components/SettingsTab";
+import { SettingsTab } from "./components/settings/SettingsTab";
 import { I18nProvider } from "./lib/i18n";
 import { translations } from "./lib/translations";
 

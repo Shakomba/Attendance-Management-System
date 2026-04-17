@@ -9,21 +9,34 @@ AI-powered face recognition attendance system for classrooms. Professors start a
 ```
 Attendance-Management-System/
 ├── backend/app/
-│   ├── main.py                  # FastAPI entry point, all routes (412 lines)
+│   ├── main.py                  # FastAPI entry point, all routes
 │   ├── config.py                # Env var configuration
 │   ├── database.py              # SQL Server connection
-│   ├── repos.py                 # SQL Server repository (631 lines)
-│   ├── demo_repo.py             # In-memory mock repository (795 lines)
+│   ├── repos.py                 # SQL Server repository
+│   ├── demo_repo.py             # In-memory mock repository
 │   ├── schemas.py               # Pydantic request/response models
+│   ├── auth.py                  # JWT + WebAuthn auth
+│   ├── webauthn_service.py      # Passkey registration/verification
 │   ├── websocket_manager.py     # Multi-client WebSocket broadcasting
 │   └── services/
 │       ├── face_engine.py       # Face detection & embedding (CPU/GPU)
 │       ├── recognition_service.py # Recognition logic, cooldowns, caching
+│       ├── enrollment_service.py  # Multi-pose enrollment pipeline
+│       ├── spoof_detector.py    # Anti-spoofing (Laplacian/LBP/FFT)
 │       └── email_service.py     # HTML email templates + SMTP sending
 ├── frontend/src/
-│   ├── App.jsx                  # Main app component (666 lines)
-│   ├── components/dashboard/    # CameraFeed, AttendanceTable, GradebookTable, EmailPanel, StatCards
-│   └── hooks/                   # useApi, useSession, useCamera, useDashboardSocket, useEmail
+│   ├── App.jsx                  # Main app component
+│   ├── components/
+│   │   ├── auth/                # LoginPage
+│   │   ├── settings/            # SettingsTab
+│   │   ├── dashboard/           # CameraFeed, AttendanceTable, GradebookTable, EmailPanel, StatCards, SessionHistory
+│   │   ├── enrollment/          # EnrollmentTab, EnrollmentModal
+│   │   └── layout/              # DashboardLayout
+│   ├── hooks/                   # useApi, useSession, useCamera, useDashboardSocket, useEmail, useEnrollment
+│   └── lib/                     # i18n, translations, utils
+├── docker/
+│   ├── Dockerfile.backend-base  # CPU base image (python + dlib + ODBC)
+│   └── Dockerfile.backend-gpu   # GPU image (CUDA + cuDNN layered on base)
 ├── database/
 │   └── 01_init_schema.sql       # Full SQL Server schema + stored procedures + views
 ├── doorway_client/
