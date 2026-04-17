@@ -873,6 +873,7 @@ async def _run_recognition(sid: str) -> None:
                                 "bottom": item.bottom,
                                 "engine_mode": item.engine_mode,
                                 "session_absent_hours": item.session_absent_hours,
+                                "challenge": item.challenge,
                             }
                             for item in frame_result.overlays
                         ],

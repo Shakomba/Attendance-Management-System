@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -27,7 +28,7 @@ class RecognitionEvent:
 
 @dataclass
 class FaceOverlay:
-    event_type: str  # "recognized", "unknown", "spoof"
+    event_type: str  # "recognized", "unknown", "spoof", "verifying"
     student_id: Optional[int]
     full_name: str
     confidence: Optional[float]
@@ -37,6 +38,7 @@ class FaceOverlay:
     bottom: int
     engine_mode: str
     session_absent_hours: int = 0
+    challenge: Optional[str] = None  # displayed to user when verifying
 
 
 @dataclass
@@ -45,22 +47,32 @@ class ProcessFrameResult:
     notifications: List[RecognitionEvent]
 
 
-# Seconds within which a student must show 2+ different matching poses.
-_POSE_LIVENESS_WINDOW_SEC = 12.0
-# Minimum number of distinct poses the face must match to be considered live.
-_POSE_LIVENESS_MIN_POSES = 2
-# Distance margin: a pose counts as "matched" if its distance is within this
-# margin of the best-matching pose distance.
-# A real face moving naturally will shift the dominant pose; 0.0 was too strict
-# and meant only the single closest pose ever accumulated.
-_POSE_MATCH_MARGIN = 0.08  # ~8% of typical CPU L2 distance / GPU cosine margin
+# ── Challenge-response liveness ───────────────────────────────────────────────
+# Each challenge requires a specific head movement detectable via pose angles.
+# A pre-recorded video cannot comply with a random challenge it hasn't seen.
 
-# Minimum embedding variance across recent frames to pass motion liveness.
-# A static photo produces near-identical embeddings every frame (variance ~0).
-# A real face has natural micro-motion giving variance > this threshold.
-_MOTION_VARIANCE_THRESHOLD = 1e-5
-# Number of consecutive frames of embedding history kept per (session, student).
-_MOTION_HISTORY_LEN = 6
+_CHALLENGES = ["turn_left", "turn_right", "tilt_up", "tilt_down"]
+
+_CHALLENGE_LABELS = {
+    "turn_left":  "Turn head LEFT",
+    "turn_right": "Turn head RIGHT",
+    "tilt_up":    "Tilt head UP",
+    "tilt_down":  "Tilt head DOWN",
+}
+
+# Angle thresholds (degrees). These match enrollment pose requirements.
+_CHALLENGE_YAW_DEG   = 15.0   # left/right
+_CHALLENGE_PITCH_DEG = 13.0   # up/down
+
+# Window to complete the challenge before it expires and a new one is issued.
+_CHALLENGE_WINDOW_SEC = 8.0
+
+# For CPU mode (no pose data): fall back to multi-pose embedding approach.
+# Seconds within which student must match 2+ distinct stored poses.
+_POSE_LIVENESS_WINDOW_SEC = 12.0
+_POSE_LIVENESS_MIN_POSES = 2
+# Margin so neighbouring poses accumulate as a real face shifts naturally.
+_POSE_MATCH_MARGIN = 0.08
 
 
 class RecognitionService:
@@ -73,16 +85,14 @@ class RecognitionService:
         self._last_event_by_student: Dict[Tuple[str, int], datetime] = {}
         self._last_unknown_event_by_session: Dict[str, datetime] = {}
 
-        # Pose-based liveness: track which pose labels matched per (session, student).
-        # {(session_id, student_id): {"poses": {pose_label: last_seen_datetime}, "first_seen": datetime}}
+        # Challenge state per (session_id, student_id).
+        # {"challenge": str, "issued_at": datetime, "completed": bool}
+        self._challenges: Dict[Tuple[str, int], Dict] = {}
+
+        # CPU fallback: pose-based liveness observations.
         self._pose_observations: Dict[Tuple[str, int], Dict] = {}
 
-        # Motion liveness: track recent embedding history per (session, student).
-        # A static photo produces near-zero variance; a real face has natural micro-motion.
-        self._embedding_history: Dict[Tuple[str, int], deque] = {}
-
-        # Students confirmed present this session — skip all spoof checks for them.
-        # {session_id: {student_id, ...}}
+        # Students confirmed present this session — skip all checks for them.
         self._confirmed_students: Dict[str, set] = {}
 
     @staticmethod
@@ -124,34 +134,75 @@ class RecognitionService:
 
     @staticmethod
     def _group_faces_by_student(faces: List[Dict]) -> Dict[int, List[Dict]]:
-        """Group known faces by student_id for multi-pose matching."""
         grouped: Dict[int, List[Dict]] = {}
         for face in faces:
             sid = face["student_id"]
             grouped.setdefault(sid, []).append(face)
         return grouped
 
-    def _check_pose_liveness(
+    def _get_or_issue_challenge(self, session_id: str, student_id: int, now: datetime) -> str:
+        """Return the active challenge for this student, issuing a new one if needed."""
+        key = (session_id, student_id)
+        state = self._challenges.get(key)
+
+        if state is None or (now - state["issued_at"]).total_seconds() > _CHALLENGE_WINDOW_SEC:
+            # Issue a new random challenge (different from the last one if possible).
+            prev = state["challenge"] if state else None
+            pool = [c for c in _CHALLENGES if c != prev] or _CHALLENGES
+            challenge = random.choice(pool)
+            self._challenges[key] = {"challenge": challenge, "issued_at": now, "completed": False}
+            return challenge
+
+        return state["challenge"]
+
+    def _check_challenge_gpu(self, session_id: str, student_id: int, pose: tuple, now: datetime) -> Tuple[bool, bool]:
+        """Check if the student completed the current pose challenge.
+
+        Uses head pose angles from InsightFace (GPU mode).
+        Returns (challenge_label, completed):
+        - completed=False: still waiting for the student to perform the action.
+        - completed=True: challenge passed — real person.
+        """
+        key = (session_id, student_id)
+        challenge = self._get_or_issue_challenge(session_id, student_id, now)
+
+        if pose is None:
+            return challenge, False
+
+        try:
+            pitch, yaw, _roll = pose
+        except Exception:
+            return challenge, False
+
+        abs_yaw, abs_pitch = abs(yaw), abs(pitch)
+
+        completed = False
+        if challenge == "turn_left" and abs_yaw >= _CHALLENGE_YAW_DEG:
+            completed = True
+        elif challenge == "turn_right" and abs_yaw >= _CHALLENGE_YAW_DEG:
+            completed = True
+        elif challenge == "tilt_up" and abs_pitch >= _CHALLENGE_PITCH_DEG:
+            completed = True
+        elif challenge == "tilt_down" and abs_pitch >= _CHALLENGE_PITCH_DEG:
+            completed = True
+
+        return challenge, completed
+
+    def _check_pose_liveness_cpu(
         self,
         session_id: str,
         student_id: int,
         candidate: np.ndarray,
         known_poses: List[Dict],
     ) -> Tuple[bool, bool]:
-        """Check liveness by requiring the face to match multiple distinct stored poses over time.
+        """CPU fallback liveness: require face to match 2+ distinct stored poses over time.
 
-        A photo shown to the camera always matches the same stored pose (whichever angle
-        the photo was taken at). A real face naturally cycles through poses as the person
-        moves — even subtle head movement shifts the best-matching pose.
-
-        Returns (warmed_up, is_live):
-        - warmed_up=False: still accumulating pose observations, don't mark attendance yet.
-        - warmed_up=True, is_live=True: matched enough distinct poses — real face.
-        - warmed_up=True, is_live=False: only ever matched one pose — likely a photo.
+        A photo always matches the same stored pose. A real face naturally
+        shifts which pose it best matches as the person makes micro-movements.
+        Returns (warmed_up, is_live).
         """
         if len(known_poses) < 2:
-            # Only one pose enrolled — can't do pose liveness. Fall back to allow.
-            return True, True
+            return True, True  # Single pose enrolled — can't do pose liveness, allow.
 
         now = datetime.now(timezone.utc)
         key = (session_id, student_id)
@@ -160,27 +211,14 @@ class RecognitionService:
             obs = {"poses": {}, "first_seen": now}
             self._pose_observations[key] = obs
 
-        # Find best matching pose for this candidate.
-        if self.face_engine.mode == "cpu":
-            scores = [(p["pose_label"], float(np.linalg.norm(candidate - p["embedding"]))) for p in known_poses]
-            scores.sort(key=lambda x: x[1])
-            best_dist = scores[0][1]
-            # All poses within margin of best are considered "matched".
-            matched = {label for label, dist in scores if dist <= best_dist + _POSE_MATCH_MARGIN}
-        else:
-            cand_norm = candidate / (np.linalg.norm(candidate) + 1e-9)
-            scores = []
-            for p in known_poses:
-                kn = p["embedding"] / (np.linalg.norm(p["embedding"]) + 1e-9)
-                scores.append((p["pose_label"], float(np.dot(cand_norm, kn))))
-            scores.sort(key=lambda x: x[1], reverse=True)
-            best_sim = scores[0][1]
-            matched = {label for label, sim in scores if sim >= best_sim - _POSE_MATCH_MARGIN}
+        scores = [(p["pose_label"], float(np.linalg.norm(candidate - p["embedding"]))) for p in known_poses]
+        scores.sort(key=lambda x: x[1])
+        best_dist = scores[0][1]
+        matched = {label for label, dist in scores if dist <= best_dist + _POSE_MATCH_MARGIN}
 
         for pose_label in matched:
             obs["poses"][pose_label] = now
 
-        # Expire observations older than the liveness window.
         cutoff = now.timestamp() - _POSE_LIVENESS_WINDOW_SEC
         obs["poses"] = {k: v for k, v in obs["poses"].items() if v.timestamp() > cutoff}
 
@@ -188,47 +226,10 @@ class RecognitionService:
         distinct_poses = len(obs["poses"])
 
         if distinct_poses >= _POSE_LIVENESS_MIN_POSES:
-            return True, True  # Saw multiple poses — live.
-
+            return True, True
         if elapsed < _POSE_LIVENESS_WINDOW_SEC:
-            return False, True  # Still in window, keep watching.
-
-        # Window expired with only one pose seen — likely a photo.
-        return True, False
-
-    def _check_motion_liveness(
-        self,
-        session_id: str,
-        student_id: int,
-        embedding: np.ndarray,
-    ) -> Tuple[bool, bool]:
-        """Detect static photos by checking embedding variance across recent frames.
-
-        A printed photo or phone photo produces near-identical face embeddings
-        frame after frame (variance ≈ 0). A real face always has micro-motion —
-        breathing, tiny head shifts, eye blinks — that produce measurable variance.
-
-        Returns (warmed_up, is_live):
-        - warmed_up=False: not enough frames collected yet.
-        - warmed_up=True, is_live=True: sufficient variance — real face.
-        - warmed_up=True, is_live=False: near-zero variance — likely a photo.
-        """
-        key = (session_id, student_id)
-        history = self._embedding_history.get(key)
-        if history is None:
-            history = deque(maxlen=_MOTION_HISTORY_LEN)
-            self._embedding_history[key] = history
-
-        history.append(embedding.copy())
-
-        if len(history) < _MOTION_HISTORY_LEN:
-            return False, True  # Still collecting frames.
-
-        # Stack embeddings and compute mean variance across all dimensions.
-        stack = np.stack(list(history), axis=0)  # shape: (N, D)
-        variance = float(np.var(stack, axis=0).mean())
-
-        return True, variance >= _MOTION_VARIANCE_THRESHOLD
+            return False, True  # Still accumulating.
+        return True, False  # Window expired with only one pose — likely a photo.
 
     def known_face_count_for_session(self, session_id: str) -> int:
         session = self.repository.get_session(session_id)
@@ -257,7 +258,6 @@ class RecognitionService:
         known_faces = self._load_known_embeddings(course_id)
         known_grouped = self._group_faces_by_student(known_faces)
 
-        # Normalise to timezone-aware UTC to prevent TypeError when comparing with stored datetimes.
         event_time = recognized_at or datetime.now(timezone.utc)
         if event_time.tzinfo is None:
             event_time = event_time.replace(tzinfo=timezone.utc)
@@ -279,7 +279,6 @@ class RecognitionService:
             if known_grouped:
                 match = self.face_engine.match_embedding_multi(detection.embedding, known_grouped)
 
-            # Fallback: if all students have only a single pose, also try flat matching for compat.
             if match is None and known_faces:
                 flat_match = self.face_engine.match_embedding(detection.embedding, known_faces)
                 if flat_match:
@@ -337,8 +336,6 @@ class RecognitionService:
                 continue
 
             # ── Step 2: Already confirmed present — skip all checks ────
-            # Runs before any spoof check so that once a student is marked
-            # present their face (or even a photo of them) always shows green.
             if match.student_id in self._confirmed_students.get(session_id, set()):
                 output.overlays.append(
                     FaceOverlay(
@@ -357,7 +354,6 @@ class RecognitionService:
                 continue
 
             # ── Step 3: Texture-based spoof detection ──────────────────
-            # Only reached for students not yet confirmed present.
             if self.spoof_detector and self.spoof_detector.enabled:
                 crop = SpoofDetector.extract_face_crop(
                     frame_bgr, detection.left, detection.top, detection.right, detection.bottom,
@@ -389,127 +385,82 @@ class RecognitionService:
                         )
                         continue
 
-            # ── Step 3.5: Motion liveness — embedding variance across frames ──
-            # Detects static photos: a real face has micro-motion that produces
-            # measurable embedding variance; a held-up photo does not.
-            motion_warmed, motion_live = self._check_motion_liveness(
-                session_id, match.student_id, detection.embedding
-            )
-            if not motion_warmed:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="verifying",
-                        student_id=match.student_id,
-                        full_name=match.full_name,
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
+            # ── Step 4: Liveness challenge ─────────────────────────────
+            # GPU mode: random pose challenge (turn left/right, tilt up/down).
+            # CPU mode: multi-pose embedding accumulation (no pose angles available).
+            if self.face_engine.mode == "gpu":
+                challenge, completed = self._check_challenge_gpu(
+                    session_id, match.student_id, detection.pose, event_time
+                )
+                if not completed:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="verifying",
+                            student_id=match.student_id,
+                            full_name=match.full_name,
+                            confidence=match.best_score,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode,
+                            session_absent_hours=absent_hours,
+                            challenge=_CHALLENGE_LABELS[challenge],
+                        )
                     )
-                )
-                continue
-            if not motion_live:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (Photo)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
-                    confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
-                    notes="spoof-photo:zero-motion-variance",
-                    recognized_at=event_time_db,
-                )
-                continue
+                    continue
+                # Challenge passed — clear state so it won't re-trigger after confirm.
+                self._challenges.pop((session_id, match.student_id), None)
 
-            # ── Step 4: Multi-embedding variance check ─────────────────
-            if match.is_suspicious:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (Suspicious)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
+            else:
+                # CPU fallback: pose-based liveness.
+                student_poses = known_grouped.get(match.student_id, [])
+                warmed_up, is_live = self._check_pose_liveness_cpu(
+                    session_id, match.student_id, detection.embedding, student_poses,
+                )
+                if not warmed_up:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="verifying",
+                            student_id=match.student_id,
+                            full_name=match.full_name,
+                            confidence=match.best_score,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode,
+                            session_absent_hours=absent_hours,
+                            challenge="Move your head slightly",
+                        )
                     )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
-                    confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
-                    notes=f"spoof-suspicious:variance={match.score_variance:.6f}",
-                    recognized_at=event_time_db,
-                )
-                continue
+                    continue
+                if not is_live:
+                    output.overlays.append(
+                        FaceOverlay(
+                            event_type="spoof",
+                            student_id=match.student_id,
+                            full_name=f"{match.full_name} (Static)",
+                            confidence=match.best_score,
+                            left=detection.left,
+                            top=detection.top,
+                            right=detection.right,
+                            bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode,
+                            session_absent_hours=absent_hours,
+                        )
+                    )
+                    self.repository.add_recognition_event(
+                        session_id=session_id,
+                        student_id=match.student_id,
+                        confidence=match.best_score,
+                        engine_mode=self.face_engine.mode,
+                        notes="spoof-static:pose-liveness-failed",
+                        recognized_at=event_time_db,
+                    )
+                    continue
 
-            # ── Step 5: Pose-based liveness check ──────────────────────
-            student_poses = known_grouped.get(match.student_id, [])
-            warmed_up, is_temporally_live = self._check_pose_liveness(
-                session_id, match.student_id, detection.embedding, student_poses,
-            )
-            if not warmed_up:
-                # Still accumulating frames — show face as "verifying" but do NOT mark attendance yet.
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="verifying",
-                        student_id=match.student_id,
-                        full_name=match.full_name,
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
-                continue
-            if not is_temporally_live:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (Static)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
-                    confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
-                    notes="spoof-static:temporal-consistency-failed",
-                    recognized_at=event_time_db,
-                )
-                continue
-
-            # ── Step 6: All checks passed — mark attendance ────────────
+            # ── Step 5: All checks passed — mark attendance ────────────
             output.overlays.append(
                 FaceOverlay(
                     event_type="recognized",
@@ -525,7 +476,6 @@ class RecognitionService:
                 )
             )
 
-            # Cooldown to avoid repeated toasts for the same student every frame.
             cooldown_key = (session_id, match.student_id)
             last_event_time = self._last_event_by_student.get(cooldown_key)
             if last_event_time and (event_time - last_event_time) < timedelta(
@@ -544,14 +494,11 @@ class RecognitionService:
             )
             self.repository.upsert_attendance_from_recognition(session_id, match.student_id, event_time_db)
 
-            # Confirmed — all future frames skip spoof checks entirely.
             self._confirmed_students.setdefault(session_id, set()).add(match.student_id)
 
             attendance = self.repository.get_attendance_row(session_id, match.student_id) or {}
             self._last_event_by_student[cooldown_key] = event_time
 
-            # Don't send a presence notification for manually-overridden students —
-            # the overlay box still shows (added above), but the attendance table stays as set.
             if attendance.get("_ManualLock"):
                 continue
 

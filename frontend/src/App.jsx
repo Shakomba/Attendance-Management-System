@@ -372,6 +372,22 @@ export default function App() {
 
       ctx.fillStyle = "#ffffff";
       ctx.fillText(label, tagX + padX, tagY + 16);
+
+      // Challenge instruction shown below the face box while verifying.
+      if (isVerifying && face.challenge) {
+        const instrFont = '600 13px "Inter", sans-serif';
+        ctx.font = instrFont;
+        const instrW = ctx.measureText(face.challenge).width + 20;
+        const instrH = 26;
+        const instrX = left + (width - instrW) / 2;
+        const instrY = bottom + 6;
+        ctx.fillStyle = "rgba(59,130,246,0.92)";
+        ctx.beginPath();
+        ctx.roundRect(instrX, instrY, instrW, instrH, 5);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(face.challenge, instrX + 10, instrY + 17);
+      }
     }
   }, [syncCanvas, overlayRef, cameraActiveRef]);
 
