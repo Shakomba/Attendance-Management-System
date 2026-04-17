@@ -27,7 +27,7 @@ class RecognitionEvent:
 
 @dataclass
 class FaceOverlay:
-    event_type: str  # "recognized", "unknown", "spoof"
+    event_type: str  # "recognized", "unknown", "spoof", "verifying"
     student_id: Optional[int]
     full_name: str
     confidence: Optional[float]
@@ -45,13 +45,16 @@ class ProcessFrameResult:
     notifications: List[RecognitionEvent]
 
 
-# Seconds within which a student must show 2+ different matching poses.
-_POSE_LIVENESS_WINDOW_SEC = 8.0
-# Minimum number of distinct poses the face must match to be considered live.
+# ── Pose liveness constants ───────────────────────────────────────────────────
+# Window in which a student must match 2+ distinct stored poses.
+_POSE_LIVENESS_WINDOW_SEC = 10.0
 _POSE_LIVENESS_MIN_POSES = 2
-# Distance margin: a pose counts as "matched" if its distance is within this
-# margin of the best-matching pose distance.
-_POSE_MATCH_MARGIN = 0.0
+# How much slack around the best-matching pose counts as "also matched".
+# 0.0 was too strict — only the single best pose ever accumulated so a real
+# face that moved subtly never got a second pose credited.
+# GPU cosine similarity space: 0.05 gives ~5% slack around best sim.
+# CPU L2 distance space: same constant works as an additive margin.
+_POSE_MATCH_MARGIN = 0.05
 
 
 class RecognitionService:
@@ -64,12 +67,10 @@ class RecognitionService:
         self._last_event_by_student: Dict[Tuple[str, int], datetime] = {}
         self._last_unknown_event_by_session: Dict[str, datetime] = {}
 
-        # Pose-based liveness: track which pose labels matched per (session, student).
-        # {(session_id, student_id): {"poses": {pose_label: last_seen_datetime}, "first_seen": datetime}}
+        # Pose-based liveness per (session_id, student_id).
         self._pose_observations: Dict[Tuple[str, int], Dict] = {}
 
-        # Students confirmed present this session — skip all spoof checks for them.
-        # {session_id: {student_id, ...}}
+        # Confirmed-present fast-path: skip all spoof checks once a student passes.
         self._confirmed_students: Dict[str, set] = {}
 
     @staticmethod
@@ -88,34 +89,26 @@ class RecognitionService:
     def _load_known_embeddings(self, course_id: int) -> List[Dict]:
         cache_key = (course_id, self.face_engine.model_name)
         now = datetime.now(timezone.utc)
-
         cached = self._embedding_cache.get(cache_key)
         if cached and (now - cached["loaded_at"]).total_seconds() < 60:
             return cached["faces"]
-
         raw_rows = self.repository.list_known_embeddings(course_id, self.face_engine.model_name)
         faces: List[Dict] = []
-
         for row in raw_rows:
-            faces.append(
-                {
-                    "student_id": int(row["StudentID"]),
-                    "full_name": str(row["FullName"]),
-                    "embedding": FaceEngine.bytes_to_embedding(row["EmbeddingData"]),
-                    "pose_label": str(row.get("PoseLabel", "front")),
-                }
-            )
-
+            faces.append({
+                "student_id": int(row["StudentID"]),
+                "full_name": str(row["FullName"]),
+                "embedding": FaceEngine.bytes_to_embedding(row["EmbeddingData"]),
+                "pose_label": str(row.get("PoseLabel", "front")),
+            })
         self._embedding_cache[cache_key] = {"loaded_at": now, "faces": faces}
         return faces
 
     @staticmethod
     def _group_faces_by_student(faces: List[Dict]) -> Dict[int, List[Dict]]:
-        """Group known faces by student_id for multi-pose matching."""
         grouped: Dict[int, List[Dict]] = {}
         for face in faces:
-            sid = face["student_id"]
-            grouped.setdefault(sid, []).append(face)
+            grouped.setdefault(face["student_id"], []).append(face)
         return grouped
 
     def _check_pose_liveness(
@@ -125,20 +118,18 @@ class RecognitionService:
         candidate: np.ndarray,
         known_poses: List[Dict],
     ) -> Tuple[bool, bool]:
-        """Check liveness by requiring the face to match multiple distinct stored poses over time.
+        """Require the face to match 2+ distinct stored poses within the window.
 
-        A photo shown to the camera always matches the same stored pose (whichever angle
-        the photo was taken at). A real face naturally cycles through poses as the person
-        moves — even subtle head movement shifts the best-matching pose.
+        A held-up photo always matches the same stored pose. A real face shifts
+        which pose it best matches as the person makes natural micro-movements.
 
         Returns (warmed_up, is_live):
-        - warmed_up=False: still accumulating pose observations, don't mark attendance yet.
-        - warmed_up=True, is_live=True: matched enough distinct poses — real face.
-        - warmed_up=True, is_live=False: only ever matched one pose — likely a photo.
+          warmed_up=False → still accumulating, show "verifying"
+          warmed_up=True, is_live=True  → passed
+          warmed_up=True, is_live=False → only one pose seen, likely a photo
         """
         if len(known_poses) < 2:
-            # Only one pose enrolled — can't do pose liveness. Fall back to allow.
-            return True, True
+            return True, True  # Can't do pose liveness with only one stored pose.
 
         now = datetime.now(timezone.utc)
         key = (session_id, student_id)
@@ -147,48 +138,40 @@ class RecognitionService:
             obs = {"poses": {}, "first_seen": now}
             self._pose_observations[key] = obs
 
-        # Find best matching pose for this candidate.
+        # Find which stored poses this candidate is close to.
         if self.face_engine.mode == "cpu":
             scores = [(p["pose_label"], float(np.linalg.norm(candidate - p["embedding"]))) for p in known_poses]
             scores.sort(key=lambda x: x[1])
-            best_dist = scores[0][1]
-            # All poses within margin of best are considered "matched".
-            matched = {label for label, dist in scores if dist <= best_dist + _POSE_MATCH_MARGIN}
+            best = scores[0][1]
+            matched = {lbl for lbl, d in scores if d <= best + _POSE_MATCH_MARGIN}
         else:
             cand_norm = candidate / (np.linalg.norm(candidate) + 1e-9)
-            scores = []
-            for p in known_poses:
-                kn = p["embedding"] / (np.linalg.norm(p["embedding"]) + 1e-9)
-                scores.append((p["pose_label"], float(np.dot(cand_norm, kn))))
+            scores = [(p["pose_label"], float(np.dot(cand_norm, p["embedding"] / (np.linalg.norm(p["embedding"]) + 1e-9)))) for p in known_poses]
             scores.sort(key=lambda x: x[1], reverse=True)
-            best_sim = scores[0][1]
-            matched = {label for label, sim in scores if sim >= best_sim - _POSE_MATCH_MARGIN}
+            best = scores[0][1]
+            matched = {lbl for lbl, s in scores if s >= best - _POSE_MATCH_MARGIN}
 
-        for pose_label in matched:
-            obs["poses"][pose_label] = now
+        for lbl in matched:
+            obs["poses"][lbl] = now
 
-        # Expire observations older than the liveness window.
+        # Expire old observations outside the window.
         cutoff = now.timestamp() - _POSE_LIVENESS_WINDOW_SEC
         obs["poses"] = {k: v for k, v in obs["poses"].items() if v.timestamp() > cutoff}
 
         elapsed = (now - obs["first_seen"]).total_seconds()
-        distinct_poses = len(obs["poses"])
+        distinct = len(obs["poses"])
 
-        if distinct_poses >= _POSE_LIVENESS_MIN_POSES:
-            return True, True  # Saw multiple poses — live.
-
+        if distinct >= _POSE_LIVENESS_MIN_POSES:
+            return True, True
         if elapsed < _POSE_LIVENESS_WINDOW_SEC:
-            return False, True  # Still in window, keep watching.
-
-        # Window expired with only one pose seen — likely a photo.
-        return True, False
+            return False, True  # Still accumulating.
+        return True, False  # Timed out with only one pose — photo.
 
     def known_face_count_for_session(self, session_id: str) -> int:
         session = self.repository.get_session(session_id)
         if not session:
             return 0
-        course_id = int(session["CourseID"])
-        return len(self._load_known_embeddings(course_id))
+        return len(self._load_known_embeddings(int(session["CourseID"])))
 
     def process_frame(
         self,
@@ -210,7 +193,6 @@ class RecognitionService:
         known_faces = self._load_known_embeddings(course_id)
         known_grouped = self._group_faces_by_student(known_faces)
 
-        # Normalise to timezone-aware UTC to prevent TypeError when comparing with stored datetimes.
         event_time = recognized_at or datetime.now(timezone.utc)
         if event_time.tzinfo is None:
             event_time = event_time.replace(tzinfo=timezone.utc)
@@ -231,86 +213,53 @@ class RecognitionService:
             match = None
             if known_grouped:
                 match = self.face_engine.match_embedding_multi(detection.embedding, known_grouped)
-
-            # Fallback: if all students have only a single pose, also try flat matching for compat.
             if match is None and known_faces:
-                flat_match = self.face_engine.match_embedding(detection.embedding, known_faces)
-                if flat_match:
+                flat = self.face_engine.match_embedding(detection.embedding, known_faces)
+                if flat:
                     from .face_engine import MultiMatchResult
                     match = MultiMatchResult(
-                        student_id=flat_match.student_id,
-                        full_name=flat_match.full_name,
-                        best_score=flat_match.score,
+                        student_id=flat.student_id,
+                        full_name=flat.full_name,
+                        best_score=flat.score,
                         score_variance=0.0,
                         is_suspicious=False,
                     )
 
             if match is None:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="unknown",
-                        student_id=None,
-                        full_name="Unknown",
-                        confidence=None,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=0,
-                    )
-                )
-
+                output.overlays.append(FaceOverlay(
+                    event_type="unknown", student_id=None, full_name="Unknown",
+                    confidence=None, left=detection.left, top=detection.top,
+                    right=detection.right, bottom=detection.bottom,
+                    engine_mode=self.face_engine.mode, session_absent_hours=0,
+                ))
                 last_unknown = self._last_unknown_event_by_session.get(session_id)
-                if last_unknown and (event_time - last_unknown) < timedelta(
-                    seconds=settings.recognition_event_cooldown_sec
-                ):
+                if last_unknown and (event_time - last_unknown) < timedelta(seconds=settings.recognition_event_cooldown_sec):
                     continue
-
                 self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=None,
-                    confidence=None,
-                    engine_mode=self.face_engine.mode,
-                    notes="unknown-face",
+                    session_id=session_id, student_id=None, confidence=None,
+                    engine_mode=self.face_engine.mode, notes="unknown-face",
                     recognized_at=event_time_db,
                 )
                 self._last_unknown_event_by_session[session_id] = event_time
-                output.notifications.append(
-                    RecognitionEvent(
-                        event_type="unknown",
-                        student_id=None,
-                        full_name="Unknown Face",
-                        confidence=None,
-                        is_present=False,
-                        recognized_at=event_time.isoformat(),
-                        engine_mode=self.face_engine.mode,
-                    )
-                )
+                output.notifications.append(RecognitionEvent(
+                    event_type="unknown", student_id=None, full_name="Unknown Face",
+                    confidence=None, is_present=False,
+                    recognized_at=event_time.isoformat(), engine_mode=self.face_engine.mode,
+                ))
                 continue
 
-            # ── Step 2: Already confirmed present — skip all checks ────
-            # Runs before any spoof check so that once a student is marked
-            # present their face (or even a photo of them) always shows green.
+            # ── Step 2: Confirmed fast-path ────────────────────────────
             if match.student_id in self._confirmed_students.get(session_id, set()):
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="recognized",
-                        student_id=match.student_id,
-                        full_name=match.full_name,
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
+                output.overlays.append(FaceOverlay(
+                    event_type="recognized", student_id=match.student_id,
+                    full_name=match.full_name, confidence=match.best_score,
+                    left=detection.left, top=detection.top,
+                    right=detection.right, bottom=detection.bottom,
+                    engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+                ))
                 continue
 
-            # ── Step 3: Texture-based spoof detection ──────────────────
-            # Only reached for students not yet confirmed present.
+            # ── Step 3: Texture spoof check ────────────────────────────
             if self.spoof_detector and self.spoof_detector.enabled:
                 crop = SpoofDetector.extract_face_crop(
                     frame_bgr, detection.left, detection.top, detection.right, detection.bottom,
@@ -318,163 +267,109 @@ class RecognitionService:
                 if crop is not None:
                     spoof_result = self.spoof_detector.analyze(crop)
                     if not spoof_result.is_live:
-                        output.overlays.append(
-                            FaceOverlay(
-                                event_type="spoof",
-                                student_id=match.student_id,
-                                full_name=f"{match.full_name} (Spoof)",
-                                confidence=spoof_result.confidence,
-                                left=detection.left,
-                                top=detection.top,
-                                right=detection.right,
-                                bottom=detection.bottom,
-                                engine_mode=self.face_engine.mode,
-                                session_absent_hours=absent_hours,
-                            )
-                        )
+                        output.overlays.append(FaceOverlay(
+                            event_type="spoof", student_id=match.student_id,
+                            full_name=f"{match.full_name} (Spoof)",
+                            confidence=spoof_result.confidence,
+                            left=detection.left, top=detection.top,
+                            right=detection.right, bottom=detection.bottom,
+                            engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+                        ))
                         self.repository.add_recognition_event(
-                            session_id=session_id,
-                            student_id=match.student_id,
-                            confidence=match.best_score,
-                            engine_mode=self.face_engine.mode,
+                            session_id=session_id, student_id=match.student_id,
+                            confidence=match.best_score, engine_mode=self.face_engine.mode,
                             notes=f"spoof-rejected:{spoof_result.reason}",
                             recognized_at=event_time_db,
                         )
                         continue
 
-            # ── Step 4: Multi-embedding variance check ─────────────────
+            # ── Step 4: Variance check ─────────────────────────────────
             if match.is_suspicious:
-                # Reset pose observations so this student can't accumulate
-                # pose matches across frames that happen to slip past the variance check.
+                # Also reset pose observations so a photo can't accumulate
+                # pose matches on frames that slipped past the variance check.
                 self._pose_observations.pop((session_id, match.student_id), None)
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (Suspicious)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
+                output.overlays.append(FaceOverlay(
+                    event_type="spoof", student_id=match.student_id,
+                    full_name=f"{match.full_name} (Suspicious)",
                     confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
+                    left=detection.left, top=detection.top,
+                    right=detection.right, bottom=detection.bottom,
+                    engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+                ))
+                self.repository.add_recognition_event(
+                    session_id=session_id, student_id=match.student_id,
+                    confidence=match.best_score, engine_mode=self.face_engine.mode,
                     notes=f"spoof-suspicious:variance={match.score_variance:.6f}",
                     recognized_at=event_time_db,
                 )
                 continue
 
-            # ── Step 5: Pose-based liveness check ──────────────────────
+            # ── Step 5: Pose liveness ──────────────────────────────────
             student_poses = known_grouped.get(match.student_id, [])
-            warmed_up, is_temporally_live = self._check_pose_liveness(
+            warmed_up, is_live = self._check_pose_liveness(
                 session_id, match.student_id, detection.embedding, student_poses,
             )
             if not warmed_up:
-                # Still accumulating frames — show face as "verifying" but do NOT mark attendance yet.
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="verifying",
-                        student_id=match.student_id,
-                        full_name=match.full_name,
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
+                output.overlays.append(FaceOverlay(
+                    event_type="verifying", student_id=match.student_id,
+                    full_name=match.full_name, confidence=match.best_score,
+                    left=detection.left, top=detection.top,
+                    right=detection.right, bottom=detection.bottom,
+                    engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+                ))
                 continue
-            if not is_temporally_live:
-                output.overlays.append(
-                    FaceOverlay(
-                        event_type="spoof",
-                        student_id=match.student_id,
-                        full_name=f"{match.full_name} (Static)",
-                        confidence=match.best_score,
-                        left=detection.left,
-                        top=detection.top,
-                        right=detection.right,
-                        bottom=detection.bottom,
-                        engine_mode=self.face_engine.mode,
-                        session_absent_hours=absent_hours,
-                    )
-                )
-                self.repository.add_recognition_event(
-                    session_id=session_id,
-                    student_id=match.student_id,
+            if not is_live:
+                output.overlays.append(FaceOverlay(
+                    event_type="spoof", student_id=match.student_id,
+                    full_name=f"{match.full_name} (Static)",
                     confidence=match.best_score,
-                    engine_mode=self.face_engine.mode,
-                    notes="spoof-static:temporal-consistency-failed",
+                    left=detection.left, top=detection.top,
+                    right=detection.right, bottom=detection.bottom,
+                    engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+                ))
+                self.repository.add_recognition_event(
+                    session_id=session_id, student_id=match.student_id,
+                    confidence=match.best_score, engine_mode=self.face_engine.mode,
+                    notes="spoof-static:pose-liveness-failed",
                     recognized_at=event_time_db,
                 )
                 continue
 
             # ── Step 6: All checks passed — mark attendance ────────────
-            output.overlays.append(
-                FaceOverlay(
-                    event_type="recognized",
-                    student_id=match.student_id,
-                    full_name=match.full_name,
-                    confidence=match.best_score,
-                    left=detection.left,
-                    top=detection.top,
-                    right=detection.right,
-                    bottom=detection.bottom,
-                    engine_mode=self.face_engine.mode,
-                    session_absent_hours=absent_hours,
-                )
-            )
+            output.overlays.append(FaceOverlay(
+                event_type="recognized", student_id=match.student_id,
+                full_name=match.full_name, confidence=match.best_score,
+                left=detection.left, top=detection.top,
+                right=detection.right, bottom=detection.bottom,
+                engine_mode=self.face_engine.mode, session_absent_hours=absent_hours,
+            ))
 
-            # Cooldown to avoid repeated toasts for the same student every frame.
             cooldown_key = (session_id, match.student_id)
             last_event_time = self._last_event_by_student.get(cooldown_key)
-            if last_event_time and (event_time - last_event_time) < timedelta(
-                seconds=settings.recognition_event_cooldown_sec
-            ):
+            if last_event_time and (event_time - last_event_time) < timedelta(seconds=settings.recognition_event_cooldown_sec):
                 self.repository.upsert_attendance_from_recognition(session_id, match.student_id, event_time_db)
                 continue
 
             self.repository.add_recognition_event(
-                session_id=session_id,
-                student_id=match.student_id,
-                confidence=match.best_score,
-                engine_mode=self.face_engine.mode,
-                notes="recognized",
-                recognized_at=event_time_db,
+                session_id=session_id, student_id=match.student_id,
+                confidence=match.best_score, engine_mode=self.face_engine.mode,
+                notes="recognized", recognized_at=event_time_db,
             )
             self.repository.upsert_attendance_from_recognition(session_id, match.student_id, event_time_db)
-
-            # Confirmed — all future frames skip spoof checks entirely.
             self._confirmed_students.setdefault(session_id, set()).add(match.student_id)
 
             attendance = self.repository.get_attendance_row(session_id, match.student_id) or {}
             self._last_event_by_student[cooldown_key] = event_time
 
-            # Don't send a presence notification for manually-overridden students —
-            # the overlay box still shows (added above), but the attendance table stays as set.
             if attendance.get("_ManualLock"):
                 continue
 
-            output.notifications.append(
-                RecognitionEvent(
-                    event_type="recognized",
-                    student_id=match.student_id,
-                    full_name=match.full_name,
-                    confidence=match.best_score,
-                    is_present=bool(attendance.get("IsPresent", False)),
-                    recognized_at=event_time.isoformat(),
-                    engine_mode=self.face_engine.mode,
-                    session_absent_hours=absent_hours,
-                )
-            )
+            output.notifications.append(RecognitionEvent(
+                event_type="recognized", student_id=match.student_id,
+                full_name=match.full_name, confidence=match.best_score,
+                is_present=bool(attendance.get("IsPresent", False)),
+                recognized_at=event_time.isoformat(), engine_mode=self.face_engine.mode,
+                session_absent_hours=absent_hours,
+            ))
 
         return output
