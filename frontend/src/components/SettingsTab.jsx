@@ -1,14 +1,64 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-    Sun, Moon, Globe, RotateCcw, AlertTriangle, Loader2,
+    Sun, Moon, RotateCcw, AlertTriangle, Loader2,
     Download, Upload, CheckCircle2, Fingerprint, Trash2, Plus,
-    Lock, ChevronDown, ChevronUp, Mail,
+    Lock, ChevronDown, ChevronUp, Mail, Check,
 } from 'lucide-react'
+import { useTranslation } from '../lib/i18n'
 
 const LANGUAGES = [
-    { code: 'en',  label: 'English' },
-    { code: 'ckb', label: 'کوردی (Central Kurdish)' },
+    { code: 'en',  native: 'English' },
+    { code: 'ckb', native: 'کوردی'   },
 ]
+
+/* ── Language Picker ─────────────────────────────────────────────────── */
+
+function LanguagePicker({ value, onChange }) {
+    const [open, setOpen] = useState(false)
+    const ref = useRef(null)
+
+    useEffect(() => {
+        if (!open) return
+        const handler = (e) => {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [open])
+
+    const current = LANGUAGES.find(l => l.code === value) || LANGUAGES[0]
+
+    return (
+        <div className="relative shrink-0" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                className="ui-input flex items-center gap-2 text-xs cursor-pointer pr-2"
+            >
+                <span dir="auto">{current.native}</span>
+                <ChevronDown size={12} className={`text-secondary transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+            </button>
+
+            {open && (
+                <div className="absolute end-0 top-full mt-1 bg-bg border border-border shadow-lg z-50 overflow-hidden min-w-full">
+                    {LANGUAGES.map((lang) => (
+                        <button
+                            key={lang.code}
+                            type="button"
+                            onClick={() => { onChange(lang.code); setOpen(false) }}
+                            className={`w-full flex items-center justify-between gap-4 px-3 py-2 text-start text-xs cursor-pointer transition-colors ${
+                                lang.code === value ? 'bg-fg text-bg' : 'hover:bg-surface text-fg'
+                            }`}
+                        >
+                            <span dir="auto">{lang.native}</span>
+                            {lang.code === value && <Check size={11} className="shrink-0" />}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
 
 /* ── Small reusable primitives ───────────────────────────────────────── */
 
@@ -65,7 +115,7 @@ function Divider({ label }) {
 
 /* ── Confirm Dialog ──────────────────────────────────────────────────── */
 
-function ConfirmDialog({ onConfirm, onCancel, busy }) {
+function ConfirmDialog({ onConfirm, onCancel, busy, t }) {
     const [exportFirst, setExportFirst] = useState(true)
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -76,9 +126,9 @@ function ConfirmDialog({ onConfirm, onCancel, busy }) {
                             <AlertTriangle size={14} className="text-red-500" />
                         </div>
                         <div>
-                            <p className="text-sm font-semibold text-fg">Reset all course data?</p>
+                            <p className="text-sm font-semibold text-fg">{t('settings_confirm_reset')}</p>
                             <p className="text-xs text-secondary mt-1 leading-relaxed">
-                                All grades, absences, sessions, and attendance history will be permanently deleted.
+                                {t('settings_confirm_desc')}
                             </p>
                         </div>
                     </div>
@@ -89,12 +139,12 @@ function ConfirmDialog({ onConfirm, onCancel, busy }) {
                             onChange={e => setExportFirst(e.target.checked)}
                             className="w-3.5 h-3.5 accent-fg cursor-pointer"
                         />
-                        <span className="text-xs text-secondary">Download a backup before resetting</span>
+                        <span className="text-xs text-secondary">{t('settings_confirm_dl')}</span>
                     </label>
                 </div>
                 <div className="border-t border-border px-5 py-3 flex justify-end gap-2 bg-surface">
                     <button onClick={onCancel} disabled={busy} className="btn-secondary text-xs px-4 py-2">
-                        Cancel
+                        {t('btn_cancel')}
                     </button>
                     <button
                         onClick={() => onConfirm(exportFirst)}
@@ -102,7 +152,7 @@ function ConfirmDialog({ onConfirm, onCancel, busy }) {
                         className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-red-500 text-white hover:bg-red-600 rounded-sm transition-colors cursor-pointer disabled:opacity-40 min-w-[126px] justify-center"
                     >
                         {busy && <Loader2 size={12} className="animate-spin" />}
-                        {busy ? 'Resetting…' : 'Reset everything'}
+                        {busy ? t('settings_btn_resetting') : t('settings_btn_reset')}
                     </button>
                 </div>
             </div>
@@ -120,6 +170,7 @@ export function SettingsTab({
     professor, onProfileUpdate,
     onReset,
 }) {
+    const { t } = useTranslation()
     const [showConfirm, setShowConfirm] = useState(false)
     const [resetting, setResetting] = useState(false)
 
@@ -152,11 +203,11 @@ export function SettingsTab({
         setProfileError('')
         setProfileSuccess(false)
         if (profileDraft.new_password && profileDraft.new_password !== profileDraft.confirm_password) {
-            setProfileError('New passwords do not match.')
+            setProfileError(t('settings_password_mismatch'))
             return
         }
         if (profileDraft.new_password && !profileDraft.current_password) {
-            setProfileError('Enter your current password to set a new one.')
+            setProfileError(t('settings_password_current_req'))
             return
         }
         setProfileSaving(true)
@@ -179,7 +230,7 @@ export function SettingsTab({
             setProfileSuccess(true)
             setShowPasswordFields(false)
         } catch (err) {
-            setProfileError(err.message || 'Failed to save.')
+            setProfileError(err.message || t('settings_save_failed'))
         } finally {
             setProfileSaving(false)
         }
@@ -342,6 +393,7 @@ export function SettingsTab({
                     onConfirm={handleConfirmReset}
                     onCancel={() => setShowConfirm(false)}
                     busy={resetting}
+                    t={t}
                 />
             )}
 
@@ -351,11 +403,11 @@ export function SettingsTab({
 
                 {/* ══ PROFILE ══════════════════════════════════════════ */}
                 <section>
-                    <SectionHeader title="Profile" description="Your account details and login credentials" />
+                    <SectionHeader title={t('settings_profile_title')} description={t('settings_profile_desc')} />
 
                     <div className="standard-card overflow-hidden">
                         {/* Avatar strip */}
-                        <div className="flex items-center gap-4 px-5 py-4 bg-surface border-b border-border">
+                        <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 bg-surface border-b border-border">
                             <div className="w-11 h-11 rounded-sm bg-fg/10 flex items-center justify-center shrink-0 select-none">
                                 <span className="text-base font-bold font-mono text-fg">{initials}</span>
                             </div>
@@ -370,9 +422,9 @@ export function SettingsTab({
                         </div>
 
                         {/* Fields */}
-                        <div className="px-5 py-5 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <Field label="Full name">
+                        <div className="px-4 sm:px-5 py-4 sm:py-5 space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                                <Field label={t('settings_fullname')}>
                                     <input
                                         type="text"
                                         value={profileDraft.full_name}
@@ -380,7 +432,7 @@ export function SettingsTab({
                                         className="ui-input w-full"
                                     />
                                 </Field>
-                                <Field label="Username">
+                                <Field label={t('settings_username')}>
                                     <input
                                         type="text"
                                         value={profileDraft.username}
@@ -390,7 +442,7 @@ export function SettingsTab({
                                     />
                                 </Field>
                             </div>
-                            <Field label="Course name">
+                            <Field label={t('settings_coursename')}>
                                 <input
                                     type="text"
                                     value={profileDraft.course_name}
@@ -399,12 +451,12 @@ export function SettingsTab({
                                 />
                             </Field>
 
-                            <div className="flex items-center justify-between pt-1">
+                            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
                                 <div className="text-xs min-h-[16px]">
                                     {profileError && <span className="text-red-500">{profileError}</span>}
                                     {profileSuccess && !profileError && (
                                         <span className="text-green-500 flex items-center gap-1">
-                                            <CheckCircle2 size={11} /> Saved
+                                            <CheckCircle2 size={11} /> {t('settings_saved')}
                                         </span>
                                     )}
                                 </div>
@@ -412,10 +464,10 @@ export function SettingsTab({
                                     type="button"
                                     onClick={handleProfileSave}
                                     disabled={profileSaving}
-                                    className="btn-primary text-xs px-4 py-1.5"
+                                    className="btn-primary text-xs px-4 py-2 w-full sm:w-auto"
                                 >
                                     {profileSaving && <Loader2 size={12} className="animate-spin" />}
-                                    {profileSaving ? 'Saving…' : 'Save changes'}
+                                    {profileSaving ? t('settings_saving') : t('settings_save_changes')}
                                 </button>
                             </div>
                         </div>
@@ -425,11 +477,11 @@ export function SettingsTab({
                             <button
                                 type="button"
                                 onClick={() => setShowPasswordFields(v => !v)}
-                                className="w-full flex items-center justify-between px-5 py-3.5 cursor-pointer hover:bg-surface transition-colors text-left"
+                                className="w-full flex items-center justify-between px-5 py-3.5 cursor-pointer hover:bg-surface transition-colors text-start"
                             >
                                 <div className="flex items-center gap-2.5">
                                     <Lock size={13} className="text-secondary" />
-                                    <span className="text-sm font-medium text-fg">Change password</span>
+                                    <span className="text-sm font-medium text-fg">{t('settings_change_password')}</span>
                                 </div>
                                 {showPasswordFields
                                     ? <ChevronUp size={14} className="text-secondary" />
@@ -438,7 +490,7 @@ export function SettingsTab({
 
                             {showPasswordFields && (
                                 <div className="border-t border-border px-5 py-5 bg-surface space-y-4">
-                                    <Field label="Current password">
+                                    <Field label={t('settings_current_password')}>
                                         <input
                                             type="password"
                                             value={profileDraft.current_password}
@@ -448,8 +500,8 @@ export function SettingsTab({
                                             placeholder="••••••••"
                                         />
                                     </Field>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Field label="New password">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                                        <Field label={t('settings_new_password')}>
                                             <input
                                                 type="password"
                                                 value={profileDraft.new_password}
@@ -459,7 +511,7 @@ export function SettingsTab({
                                                 placeholder="••••••••"
                                             />
                                         </Field>
-                                        <Field label="Confirm new password">
+                                        <Field label={t('settings_confirm_password')}>
                                             <input
                                                 type="password"
                                                 value={profileDraft.confirm_password}
@@ -470,17 +522,15 @@ export function SettingsTab({
                                             />
                                         </Field>
                                     </div>
-                                    <div className="flex justify-end">
-                                        <button
-                                            type="button"
-                                            onClick={handleProfileSave}
-                                            disabled={profileSaving}
-                                            className="btn-primary text-xs px-4 py-1.5"
-                                        >
-                                            {profileSaving && <Loader2 size={12} className="animate-spin" />}
-                                            {profileSaving ? 'Saving…' : 'Update password'}
-                                        </button>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleProfileSave}
+                                        disabled={profileSaving}
+                                        className="btn-primary text-xs px-4 py-2 w-full sm:w-auto sm:self-end"
+                                    >
+                                        {profileSaving && <Loader2 size={12} className="animate-spin" />}
+                                        {profileSaving ? t('settings_saving') : t('settings_update_password')}
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -491,13 +541,13 @@ export function SettingsTab({
                 {passkeySupported && (
                     <section>
                         <SectionHeader
-                            title="Passkeys"
-                            description="Sign in with biometrics — no password required"
+                            title={t('settings_passkey_title')}
+                            description={t('settings_passkey_desc')}
                         />
                         <div className="standard-card overflow-hidden">
                             {passkeys.length === 0 ? (
                                 <div className="px-5 py-4 text-xs text-secondary">
-                                    No passkeys registered yet.
+                                    {t('settings_passkey_none')}
                                 </div>
                             ) : (
                                 <div className="divide-y divide-border">
@@ -509,7 +559,7 @@ export function SettingsTab({
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-medium text-fg truncate">{pk.device_name}</p>
-                                                    <p className="text-[11px] text-secondary">Added {new Date(pk.created_at).toLocaleDateString()}</p>
+                                                    <p className="text-[11px] text-secondary">{t('settings_passkey_added')} {new Date(pk.created_at).toLocaleDateString()}</p>
                                                 </div>
                                             </div>
                                             <button
@@ -528,24 +578,24 @@ export function SettingsTab({
                                 </div>
                             )}
 
-                            <div className="border-t border-border px-5 py-4 flex items-center gap-2 bg-surface">
+                            <div className="border-t border-border px-4 sm:px-5 py-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-surface">
                                 <input
                                     type="text"
                                     value={passkeyDeviceName}
                                     onChange={e => setPasskeyDeviceName(e.target.value)}
-                                    placeholder="Device name (optional)"
+                                    placeholder={t('settings_passkey_device')}
                                     className="ui-input flex-1 text-sm"
                                 />
                                 <button
                                     type="button"
                                     onClick={handleRegisterPasskey}
                                     disabled={registeringPasskey}
-                                    className="btn-secondary text-xs flex items-center gap-1.5 whitespace-nowrap"
+                                    className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap"
                                 >
                                     {registeringPasskey
                                         ? <Loader2 size={12} className="animate-spin" />
                                         : <Plus size={12} />}
-                                    {registeringPasskey ? 'Registering…' : 'Add passkey'}
+                                    {registeringPasskey ? t('settings_saving') : t('settings_passkey_add')}
                                 </button>
                             </div>
                         </div>
@@ -554,14 +604,14 @@ export function SettingsTab({
 
                 {/* ══ APPEARANCE ═══════════════════════════════════════ */}
                 <section>
-                    <SectionHeader title="Appearance" description="Theme and language preferences" />
+                    <SectionHeader title={t('settings_appearance_title')} description={t('settings_appearance_desc')} />
 
                     {/* Theme cards */}
                     <div className="grid grid-cols-2 gap-3 mb-3">
                         <button
                             type="button"
                             onClick={() => theme !== 'light' && onToggleTheme()}
-                            className={`flex flex-col gap-3 p-4 rounded-sm border-2 transition-colors duration-150 cursor-pointer text-left focus:outline-none ${
+                            className={`flex flex-col gap-3 p-4 rounded-sm border-2 transition-colors duration-150 cursor-pointer text-start focus:outline-none ${
                                 theme === 'light' ? 'border-fg' : 'border-border hover:border-fg/40'
                             }`}
                         >
@@ -573,7 +623,7 @@ export function SettingsTab({
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
                                     <Sun size={12} className="text-secondary" />
-                                    <span className="text-xs font-medium text-fg">Light</span>
+                                    <span className="text-xs font-medium text-fg">{t('settings_theme_light')}</span>
                                 </div>
                                 {theme === 'light' && <CheckCircle2 size={13} className="text-fg" />}
                             </div>
@@ -582,7 +632,7 @@ export function SettingsTab({
                         <button
                             type="button"
                             onClick={() => theme !== 'dark' && onToggleTheme()}
-                            className={`flex flex-col gap-3 p-4 rounded-sm border-2 transition-colors duration-150 cursor-pointer text-left focus:outline-none ${
+                            className={`flex flex-col gap-3 p-4 rounded-sm border-2 transition-colors duration-150 cursor-pointer text-start focus:outline-none ${
                                 theme === 'dark' ? 'border-fg' : 'border-border hover:border-fg/40'
                             }`}
                         >
@@ -594,7 +644,7 @@ export function SettingsTab({
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
                                     <Moon size={12} className="text-secondary" />
-                                    <span className="text-xs font-medium text-fg">Dark</span>
+                                    <span className="text-xs font-medium text-fg">{t('settings_theme_dark')}</span>
                                 </div>
                                 {theme === 'dark' && <CheckCircle2 size={13} className="text-fg" />}
                             </div>
@@ -602,30 +652,22 @@ export function SettingsTab({
                     </div>
 
                     {/* Language + notifications in one card */}
-                    <div className="standard-card px-5">
-                        <div className="flex items-center justify-between gap-6 py-4 border-b border-border">
-                            <div>
-                                <p className="text-sm font-medium text-fg">Language</p>
-                                <p className="text-xs text-secondary mt-0.5">Interface display language</p>
+                    <div className="standard-card px-4 sm:px-5">
+                        <div className="flex items-center justify-between gap-3 sm:gap-6 py-4 border-b border-border">
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium text-fg">{t('settings_language')}</p>
+                                <p className="text-xs text-secondary mt-0.5">{t('settings_language_desc')}</p>
                             </div>
-                            <select
-                                value={language}
-                                onChange={e => onChangeLanguage(e.target.value)}
-                                className="ui-input text-xs cursor-pointer shrink-0"
-                            >
-                                {LANGUAGES.map(({ code, label }) => (
-                                    <option key={code} value={code}>{label}</option>
-                                ))}
-                            </select>
+                            <LanguagePicker value={language} onChange={onChangeLanguage} />
                         </div>
-                        <div className="flex items-center justify-between gap-6 py-4">
-                            <div>
+                        <div className="flex items-center justify-between gap-3 sm:gap-6 py-4">
+                            <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                    <Mail size={13} className="text-secondary" />
-                                    <p className="text-sm font-medium text-fg">Email absent students after session</p>
+                                    <Mail size={13} className="text-secondary shrink-0" />
+                                    <p className="text-sm font-medium text-fg">{t('settings_email_pref')}</p>
                                 </div>
-                                <p className="text-xs text-secondary mt-0.5 ml-[22px]">
-                                    Send absence reports automatically when a lecture ends
+                                <p className="text-xs text-secondary mt-0.5 ms-[22px] leading-relaxed">
+                                    {t('settings_email_pref_desc')}
                                 </p>
                             </div>
                             <Toggle checked={sendEmailsOnFinalize} onChange={onToggleSendEmails} />
@@ -635,42 +677,42 @@ export function SettingsTab({
 
                 {/* ══ DATA ═════════════════════════════════════════════ */}
                 <section>
-                    <SectionHeader title="Data" description="Export or restore course grades and session history" />
-                    <div className="standard-card px-5">
+                    <SectionHeader title={t('settings_data_title')} description={t('settings_data_desc')} />
+                    <div className="standard-card px-4 sm:px-5">
                         {/* Export */}
-                        <div className="flex items-center justify-between gap-6 py-4 border-b border-border">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-4 border-b border-border">
                             <div>
                                 <div className="flex items-center gap-1.5">
                                     <Download size={13} className="text-secondary" />
-                                    <p className="text-sm font-medium text-fg">Export backup</p>
+                                    <p className="text-sm font-medium text-fg">{t('settings_export')}</p>
                                 </div>
-                                <p className="text-xs text-secondary mt-0.5 ml-[22px]">
-                                    Download grades, sessions, and attendance as a ZIP archive
+                                <p className="text-xs text-secondary mt-0.5 ms-[22px]">
+                                    {t('settings_export_desc')}
                                 </p>
                             </div>
                             <button
                                 type="button"
                                 onClick={handleExport}
                                 disabled={exporting}
-                                className="btn-secondary text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
                             >
                                 {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                                {exporting ? 'Exporting…' : 'Export ZIP'}
+                                {exporting ? t('settings_btn_exporting') : t('settings_btn_export')}
                             </button>
                         </div>
 
                         {/* Import */}
-                        <div className="flex items-start justify-between gap-6 py-4">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 py-4">
                             <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
                                     <Upload size={13} className="text-secondary" />
-                                    <p className="text-sm font-medium text-fg">Import backup</p>
+                                    <p className="text-sm font-medium text-fg">{t('settings_import')}</p>
                                 </div>
-                                <p className="text-xs text-secondary mt-0.5 ml-[22px]">
-                                    Restore from a ZIP backup, or upload a grades CSV for grades only
+                                <p className="text-xs text-secondary mt-0.5 ms-[22px]">
+                                    {t('settings_import_desc')}
                                 </p>
                                 {importResult && (
-                                    <div className="mt-2 ml-[22px]">
+                                    <div className="mt-2 ms-[22px]">
                                         {!importResult.errors?.length ? (
                                             <p className="text-xs text-green-500 flex items-center gap-1">
                                                 <CheckCircle2 size={11} />
@@ -692,10 +734,10 @@ export function SettingsTab({
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={importing}
-                                className="btn-secondary text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
                             >
                                 {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                                {importing ? 'Importing…' : 'Import backup'}
+                                {importing ? t('settings_btn_importing') : t('settings_btn_import')}
                             </button>
                         </div>
                     </div>
@@ -703,22 +745,22 @@ export function SettingsTab({
 
                 {/* ══ DANGER ZONE ══════════════════════════════════════ */}
                 <section>
-                    <SectionHeader title="Danger Zone" description="Destructive actions — proceed with caution" />
+                    <SectionHeader title={t('settings_danger_title')} description={t('settings_danger_desc')} />
                     <div className="border border-red-500/25 rounded-sm overflow-hidden">
-                        <div className="flex items-start justify-between gap-6 px-5 py-5">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 sm:px-5 py-4 sm:py-5">
                             <div>
-                                <p className="text-sm font-medium text-fg">Reset course data</p>
+                                <p className="text-sm font-medium text-fg">{t('settings_reset')}</p>
                                 <p className="text-xs text-secondary mt-1 leading-relaxed">
-                                    Permanently delete all grades, absences, sessions, and attendance records for this course.
+                                    {t('settings_reset_desc')}
                                 </p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setShowConfirm(true)}
-                                className="shrink-0 flex items-center gap-1.5 px-3 py-2 border border-red-500/30 text-red-500 text-xs font-medium rounded-sm hover:bg-red-500/10 transition-colors cursor-pointer whitespace-nowrap"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 border border-red-500/30 text-red-500 text-xs font-medium rounded-sm hover:bg-red-500/10 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                             >
                                 <RotateCcw size={12} />
-                                Reset data
+                                {t('settings_btn_reset')}
                             </button>
                         </div>
                     </div>

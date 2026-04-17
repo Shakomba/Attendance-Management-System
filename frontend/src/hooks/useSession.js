@@ -26,12 +26,13 @@ export function useSession(apiFetch, courseId) {
     }
   }, [apiFetch, courseId]);
 
-  const finalizeSession = useCallback(async (sendEmails = true) => {
+    const finalizeSession = useCallback(async (sendEmails = true) => {
     if (!sessionId) return null;
     setBusy((prev) => ({ ...prev, finalizing: true }));
     try {
+      const lang = window.localStorage.getItem("app_lang") || "en";
       const result = await apiFetch(
-        `/api/sessions/${sessionId}/finalize-send-emails?send_emails=${sendEmails}`,
+        `/api/sessions/${sessionId}/finalize-send-emails?send_emails=${sendEmails}&lang=${lang}`,
         {
           method: "POST",
           body: JSON.stringify({}),

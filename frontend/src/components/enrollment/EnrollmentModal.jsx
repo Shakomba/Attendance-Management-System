@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { X, CheckCircle2, AlertTriangle, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, User, ScanFace } from 'lucide-react'
+import { useTranslation } from '../../lib/i18n'
 
 const POSE_ICONS = {
     front: User,
@@ -10,14 +11,6 @@ const POSE_ICONS = {
 }
 
 const POSE_LABELS = ['front', 'left', 'right', 'up', 'down']
-
-const POSE_CMD = {
-    front: 'FACE FORWARD',
-    left: 'TURN LEFT',
-    right: 'TURN RIGHT',
-    up: 'LOOK UP',
-    down: 'LOOK DOWN',
-}
 
 export function EnrollmentModal({
     studentName,
@@ -35,7 +28,16 @@ export function EnrollmentModal({
     videoRef,
     canvasRef,
 }) {
+    const { t } = useTranslation()
     const mirrorRef = useRef(null)
+
+    const POSE_CMD = {
+        front: t('pose_cmd_front'),
+        left: t('pose_cmd_left'),
+        right: t('pose_cmd_right'),
+        up: t('pose_cmd_up'),
+        down: t('pose_cmd_down'),
+    }
 
     useEffect(() => {
         if (!enrolling) return
@@ -94,11 +96,11 @@ export function EnrollmentModal({
             `}</style>
 
             <div
-                className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm"
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
                 onClick={onClose}
             >
                 <div
-                    className="ams-modal bg-bg border border-border w-full sm:max-w-sm shadow-2xl mb-0 sm:mb-0"
+                    className="ams-modal bg-bg border border-border w-full max-w-sm shadow-2xl"
                     onClick={e => e.stopPropagation()}
                     style={{ boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 30px 60px rgba(0,0,0,0.7)' }}
                 >
@@ -107,7 +109,7 @@ export function EnrollmentModal({
                         <div className="flex items-center gap-2.5">
                             <ScanFace size={13} className="text-secondary" />
                             <span className="text-[10px] font-mono uppercase tracking-widest text-secondary">
-                                Biometric Enrollment
+                                {t('enroll_biometric')}
                             </span>
                             <span className="text-[10px] font-mono text-fg opacity-60">/ {studentName}</span>
                         </div>
@@ -124,17 +126,17 @@ export function EnrollmentModal({
                             </div>
                             <div className="text-center">
                                 <p className="text-[10px] font-mono uppercase tracking-widest text-green-500 mb-1.5">
-                                    Registration Complete
+                                    {t('enroll_success')}
                                 </p>
                                 <p className="text-[11px] font-mono text-secondary">
-                                    {totalPoses} biometric vectors captured
+                                    {totalPoses} {t('enroll_vectors')}
                                 </p>
                             </div>
                             <button
                                 onClick={onClose}
                                 className="mt-1 px-8 py-2.5 text-xs font-mono uppercase tracking-wider bg-green-500 text-black hover:bg-green-400 transition-colors cursor-pointer"
                             >
-                                Confirm
+                                {t('action_confirm')}
                             </button>
                         </div>
                     )}
@@ -147,7 +149,7 @@ export function EnrollmentModal({
                             </div>
                             <div className="text-center">
                                 <p className="text-[10px] font-mono uppercase tracking-widest text-red-500 mb-2">
-                                    Scan Failed
+                                    {t('enroll_failed')}
                                 </p>
                                 <p className="text-[11px] font-mono text-secondary text-center max-w-[220px] leading-relaxed">
                                     {error}
@@ -158,13 +160,13 @@ export function EnrollmentModal({
                                     onClick={onStart}
                                     className="px-5 py-2 text-xs font-mono uppercase tracking-wider border border-fg text-fg hover:bg-fg hover:text-bg transition-colors cursor-pointer"
                                 >
-                                    Retry
+                                    {t('enroll_retry')}
                                 </button>
                                 <button
                                     onClick={onClose}
                                     className="px-5 py-2 text-xs font-mono uppercase tracking-wider border border-border text-secondary hover:text-fg transition-colors cursor-pointer"
                                 >
-                                    Cancel
+                                    {t('btn_cancel')}
                                 </button>
                             </div>
                         </div>
@@ -179,37 +181,37 @@ export function EnrollmentModal({
                                 <div />
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
                                     <ArrowUp size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">up</span>
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_up')}</span>
                                 </div>
                                 <div />
                                 {/* Row 2 */}
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
                                     <ArrowLeft size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">left</span>
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_left')}</span>
                                 </div>
                                 <div className="border-2 border-fg flex flex-col items-center justify-center py-2 gap-1">
                                     <User size={14} className="text-fg" />
-                                    <span className="text-[8px] font-mono text-fg uppercase">front</span>
+                                    <span className="text-[8px] font-mono text-fg uppercase">{t('pose_front')}</span>
                                 </div>
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
                                     <ArrowRight size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">right</span>
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_right')}</span>
                                 </div>
                                 {/* Row 3 */}
                                 <div />
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
                                     <ArrowDown size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">down</span>
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_down')}</span>
                                 </div>
                                 <div />
                             </div>
 
                             <div className="text-center">
                                 <p className="text-[10px] font-mono uppercase tracking-widest text-fg mb-1.5">
-                                    5-Angle Face Scan
+                                    {t('enroll_5_angle')}
                                 </p>
                                 <p className="text-[11px] font-mono text-secondary leading-relaxed max-w-[200px] text-center">
-                                    Follow the on-screen prompts to capture all pose vectors
+                                    {t('enroll_scan_desc')}
                                 </p>
                             </div>
 
@@ -217,7 +219,7 @@ export function EnrollmentModal({
                                 onClick={onStart}
                                 className="px-10 py-3 text-xs font-mono uppercase tracking-widest bg-fg text-bg hover:opacity-80 transition-opacity cursor-pointer"
                             >
-                                Begin Scan
+                                {t('enroll_begin')}
                             </button>
                         </div>
                     )}
@@ -287,7 +289,7 @@ export function EnrollmentModal({
                                                 </div>
                                                 <span className={`text-[9px] font-mono uppercase tracking-wide ${
                                                     captured ? 'text-green-500' : active ? 'text-fg' : 'text-secondary/30'
-                                                }`}>{pose}</span>
+                                                }`}>{t(`pose_${pose}`)}</span>
                                             </div>
                                         )
                                     })}
@@ -306,7 +308,7 @@ export function EnrollmentModal({
                                         onClick={onStop}
                                         className="text-[10px] font-mono uppercase tracking-widest text-secondary hover:text-red-400 transition-colors cursor-pointer"
                                     >
-                                        Abort
+                                        {t('enroll_abort')}
                                     </button>
                                 </div>
                             </div>

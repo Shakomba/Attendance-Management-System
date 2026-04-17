@@ -1,4 +1,5 @@
 import { Activity, VideoOff } from 'lucide-react'
+import { useTranslation } from '../../lib/i18n'
 
 export function CameraFeed({
   cameraRunning,
@@ -8,6 +9,8 @@ export function CameraFeed({
   toggleCamera,
   sessionId
 }) {
+  const { t } = useTranslation()
+  
   return (
     <div className="standard-card flex flex-col h-[260px] sm:h-[360px] lg:h-[500px]">
       <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border bg-surface flex items-center justify-between">
@@ -15,7 +18,7 @@ export function CameraFeed({
           className={`flex items-center gap-2 sm:gap-3 cursor-pointer user-select-none ${!sessionId ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <span className="text-xs sm:text-sm font-semibold tracking-tight uppercase text-primary">
-            Camera
+            {t('camera_live')}
           </span>
           <div className={`relative h-5 w-9 transition-colors border border-fg ${cameraRunning ? 'bg-fg' : 'bg-surface'}`}>
             <div className={`absolute top-[2px] left-[2px] h-[14px] w-[14px] transition-transform duration-200 ${cameraRunning ? 'translate-x-[18px] bg-bg' : 'bg-fg'}`}></div>
@@ -43,17 +46,19 @@ export function CameraFeed({
         {!cameraRunning && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white/30 z-10 font-mono text-sm gap-2">
             <VideoOff size={32} />
-            <span>Stream Inactive</span>
+            <span>{t('camera_offline')}</span>
           </div>
         )}
         <div ref={viewportRef} className="absolute inset-0">
           <canvas
             ref={frameCanvasRef}
             className="absolute inset-0 w-full h-full"
+            style={{ objectFit: 'contain' }}
           />
           <canvas
             ref={overlayCanvasRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ objectFit: 'contain' }}
           />
         </div>
       </div>

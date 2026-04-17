@@ -1,7 +1,9 @@
 import { Check, X, HelpCircle, Loader2, Clock } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { useTranslation } from '../../lib/i18n'
 
 export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessionEndTime, markManualAttendance, attendanceBusyByStudent }) {
+  const { t } = useTranslation()
   const sessionEnded = !sessionId && !!sessionEndTime
 
   const [elapsed, setElapsed] = useState(0)
@@ -32,7 +34,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
     return (
       <div className="standard-card flex flex-col items-center justify-center h-full min-h-[300px] text-secondary">
         <HelpCircle size={48} className="mb-4 opacity-20" />
-        <p>No active lecture found</p>
+        <p>{t('stat_absent_inactive')}</p>
       </div>
     )
   }
@@ -42,12 +44,12 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
       <div className="px-6 py-4 border-b border-border bg-surface">
         <div className="flex items-center gap-2 text-xs font-mono text-secondary">
           {sessionStartTime && (
-            <span>Started <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span> {!sessionEnded && `(${formatElapsed(elapsed)})`}</span>
+            <span>{t('history_started')} <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span> {!sessionEnded && `(${formatElapsed(elapsed)})`}</span>
           )}
           {sessionEnded && sessionEndTime && (
             <>
               <span className="opacity-40">·</span>
-              <span>Ended <span className="text-primary">{sessionEndTime.toLocaleTimeString()}</span></span>
+              <span>{t('history_ended')} <span className="text-primary">{sessionEndTime.toLocaleTimeString()}</span></span>
             </>
           )}
         </div>
@@ -56,16 +58,16 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
       <div className="flex-1 overflow-auto max-h-[400px] lg:max-h-[500px]">
         {attendance.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-secondary text-sm">
-            No students registered for this course.
+            {t('attendance_no_students')}
           </div>
         ) : (
-          <table className="w-full text-left text-sm whitespace-nowrap">
+          <table className="w-full text-start text-sm whitespace-nowrap">
             <thead className="sticky top-0 bg-bg border-b border-border text-secondary text-xs uppercase z-10 hidden sm:table-header-group">
               <tr>
-                <th className="px-6 py-3 font-medium">Student</th>
-                <th className="px-6 py-3 font-medium">Status</th>
-                <th className="px-6 py-3 font-medium">Arrived</th>
-                {!sessionEnded && <th className="px-6 py-3 font-medium text-right">Overrides</th>}
+                <th className="px-6 py-3 font-medium">{t('table_student')}</th>
+                <th className="px-6 py-3 font-medium">{t('table_status')}</th>
+                <th className="px-6 py-3 font-medium">{t('table_first_seen')}</th>
+                {!sessionEnded && <th className="px-6 py-3 font-medium text-end">{t('table_actions')}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -87,15 +89,15 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                           <div className="flex items-center gap-2 mt-1 sm:hidden">
                             {isLate ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-500">
-                                <Clock size={10} /> Late ({absentHours}h absent)
+                                <Clock size={10} /> {t('status_late')} ({absentHours}h)
                               </span>
                             ) : present ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-600 dark:text-green-400">
-                                <Check size={10} /> Present
+                                <Check size={10} /> {t('status_present')}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-secondary">
-                                <X size={10} /> Absent
+                                <X size={10} /> {t('status_absent')}
                               </span>
                             )}
                             {present && row.FirstSeenAt && (
@@ -114,15 +116,15 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     <td className="px-3 py-3 sm:px-6 sm:py-4 hidden sm:table-cell">
                       {isLate ? (
                         <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-red-500/40 bg-red-500/10 text-red-500 whitespace-nowrap">
-                          <Clock size={12} /> Late ({absentHours}h)
+                          <Clock size={12} /> {t('status_late')} ({absentHours}h)
                         </span>
                       ) : present ? (
                         <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-border bg-black text-white w-24">
-                          <Check size={12} /> Present
+                          <Check size={12} /> {t('status_present')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border border-border bg-surface text-secondary w-24">
-                          <X size={12} /> Absent
+                          <X size={12} /> {t('status_absent')}
                         </span>
                       )}
                     </td>
@@ -132,7 +134,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     </td>
 
                     {!sessionEnded && (
-                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-right">
+                      <td className="px-3 py-3 sm:px-6 sm:py-4 text-end">
                         {busy ? (
                           <Loader2 size={16} className="animate-spin inline-block text-secondary" />
                         ) : (
@@ -141,7 +143,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                               disabled={!!present}
                               onClick={() => markManualAttendance(row.StudentID, row.FullName, "present")}
                               className="p-2.5 sm:p-1.5 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer"
-                              title="Mark Present"
+                              title={t('action_mark_present')}
                             >
                               <Check size={14} />
                             </button>
@@ -149,7 +151,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                               disabled={!present}
                               onClick={() => markManualAttendance(row.StudentID, row.FullName, "absent")}
                               className="p-2.5 sm:p-1.5 rounded-sm border border-border text-secondary hover:bg-surface hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
-                              title="Mark Absent"
+                              title={t('action_mark_absent')}
                             >
                               <X size={14} />
                             </button>

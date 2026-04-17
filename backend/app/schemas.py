@@ -77,6 +77,7 @@ class GenericMessage(BaseModel):
 class BulkEmailRequest(BaseModel):
     student_ids: List[int]
     email_type: str  # "grade_report" or "absence_report"
+    lang: str = "en"
 
 
 class BulkEmailResponse(BaseModel):

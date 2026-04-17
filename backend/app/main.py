@@ -711,6 +711,7 @@ def update_session_attendance(
 async def finalize_and_email(
     session_id: str,
     send_emails: bool = Query(default=True),
+    lang: str = Query(default="en"),
     professor: dict = Depends(get_current_professor),
 ) -> FinalizeSessionResponse:
     _get_session_or_403(professor, session_id)
@@ -718,7 +719,7 @@ async def finalize_and_email(
 
     if send_emails:
         async def _send():
-            await asyncio.to_thread(email_service.send_absentee_reports, session_id)
+            await asyncio.to_thread(email_service.send_absentee_reports, session_id, lang)
         asyncio.create_task(_send())
 
     return FinalizeSessionResponse(session_id=session_id, emails_sent=0, email_failures=0)
@@ -760,7 +761,7 @@ def send_bulk_email(
     if not students:
         raise HTTPException(status_code=404, detail="No matching students found for this course.")
 
-    result = email_service.send_bulk_emails(students, payload.email_type)
+    result = email_service.send_bulk_emails(students, payload.email_type, payload.lang)
     return BulkEmailResponse(**result)
 
 

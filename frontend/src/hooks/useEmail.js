@@ -10,6 +10,7 @@ export function useEmail(apiFetch) {
             setSending(true);
             setLastResult(null);
             try {
+                const lang = window.localStorage.getItem("app_lang") || "en";
                 const result = await apiFetch(
                     `/api/courses/${courseId}/emails/send`,
                     {
@@ -17,6 +18,7 @@ export function useEmail(apiFetch) {
                         body: JSON.stringify({
                             student_ids: studentIds,
                             email_type: emailType,
+                            lang: lang,
                         }),
                     }
                 );

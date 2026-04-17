@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Mail, Send, FileText, Clock, AlertTriangle, Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { useTranslation } from '../../lib/i18n'
 
 /* ── Toast ─────────────────────────────────────────────────────── */
 const TOAST_MS = 5000
@@ -66,16 +67,17 @@ function Toast({ toast, onClose }) {
 
 function ToastContainer({ toasts, onClose }) {
     if (!toasts.length) return null
+    const slideX = document.documentElement.dir === 'rtl' ? '-110%' : '110%'
     return (
         <>
             <style>{`
                 @keyframes toastSlideIn {
-                    from { opacity: 0; transform: translateX(110%); }
+                    from { opacity: 0; transform: translateX(${slideX}); }
                     to   { opacity: 1; transform: translateX(0); }
                 }
                 @keyframes toastSlideOut {
                     from { opacity: 1; transform: translateX(0); }
-                    to   { opacity: 0; transform: translateX(110%); }
+                    to   { opacity: 0; transform: translateX(${slideX}); }
                 }
                 @keyframes toastRingDrain {
                     from { stroke-dashoffset: 0; }
@@ -83,7 +85,7 @@ function ToastContainer({ toasts, onClose }) {
                 }
             `}</style>
             <div style={{
-                position: 'fixed', top: '72px', right: '16px', // top: 72px brings it below the 56px (h-14) header
+                position: 'fixed', top: '72px', insetInlineEnd: '16px',
                 zIndex: 99999,
                 display: 'flex', flexDirection: 'column', gap: '8px',
                 pointerEvents: 'none',
@@ -98,6 +100,7 @@ function ToastContainer({ toasts, onClose }) {
 
 /* ── EmailPanel ─────────────────────────────────────────────────── */
 export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearResult }) {
+    const { t } = useTranslation()
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [emailType, setEmailType] = useState(null)  // 'grade_report' | 'absence_report'
     const [toasts, setToasts] = useState([])
@@ -139,20 +142,20 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
         clearResult()
         const result = await sendBulkEmail(courseId, [...selectedIds], emailType)
         if (!result) {
-            addToast('error', 'Send Failed', 'An unexpected error occurred. Please try again.')
+            addToast('error', t('email_send_failed'), 'An unexpected error occurred. Please try again.')
             return
         }
         if (result.error) {
-            addToast('error', 'Send Failed', result.error)
+            addToast('error', t('email_send_failed'), result.error)
             return
         }
-        const typeLabel = emailType === 'grade_report' ? 'Grade Reports' : 'Absence Reports'
+        const typeLabel = emailType === 'grade_report' ? t('email_send_grades') : t('email_send_absence')
         if (result.failed > 0 && result.sent === 0) {
-            addToast('error', `${typeLabel} — All Failed`, `${result.failed} email(s) could not be sent.`)
+            addToast('error', typeLabel, t('email_failed'))
         } else if (result.failed > 0) {
-            addToast('error', `${typeLabel} — Partial Failure`, `${result.sent} sent, ${result.failed} failed.`)
+            addToast('error', typeLabel, `${result.sent} ${t('email_sent_count')}, ${result.failed} ${t('email_failed_count')}.`)
         } else {
-            addToast('success', `${typeLabel} Sent`, `${result.sent} email(s) delivered successfully.`)
+            addToast('success', typeLabel, t('email_success'))
             setSelectedIds(new Set())
         }
     }
@@ -163,7 +166,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
         return (
             <div className="standard-card p-10 flex flex-col items-center justify-center text-secondary border-dashed">
                 <Mail size={32} className="mb-4 opacity-50" />
-                <p>No students available to email</p>
+                <p>{t('email_no_students')}</p>
             </div>
         )
     }
@@ -175,12 +178,12 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
             <div className="space-y-6 animate-in fade-in duration-300">
                 {/* Email Type Selection */}
                 <div>
-                    <h3 className="text-xs font-semibold tracking-tight uppercase text-secondary mb-3">Email Type</h3>
+                    <h3 className="text-xs font-semibold tracking-tight uppercase text-secondary mb-3">{t('email_type_label')}</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <button
                             type="button"
                             onClick={() => { setEmailType('grade_report'); clearResult(); }}
-                            className={`standard-card p-5 text-left transition-all duration-200 cursor-pointer group ${emailType === 'grade_report'
+                            className={`standard-card p-5 text-start transition-all duration-200 cursor-pointer group ${emailType === 'grade_report'
                                 ? 'ring-2 ring-fg border-fg'
                                 : 'hover:border-secondary'
                                 }`}
@@ -190,8 +193,8 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                     <FileText size={18} />
                                 </div>
                                 <div>
-                                    <p className="font-semibold text-sm text-primary">Grade Report</p>
-                                    <p className="text-xs text-secondary mt-1">Full grade breakdown: Q1, Q2, Project, Assignment, Midterm, Final, penalties, and adjusted total.</p>
+                                    <p className="font-semibold text-sm text-primary">{t('email_grade_report')}</p>
+                                    <p className="text-xs text-secondary mt-1">{t('email_grade_report_desc')}</p>
                                 </div>
                             </div>
                         </button>
@@ -199,7 +202,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                         <button
                             type="button"
                             onClick={() => { setEmailType('absence_report'); clearResult(); }}
-                            className={`standard-card p-5 text-left transition-all duration-200 cursor-pointer group ${emailType === 'absence_report'
+                            className={`standard-card p-5 text-start transition-all duration-200 cursor-pointer group ${emailType === 'absence_report'
                                 ? 'ring-2 ring-fg border-fg'
                                 : 'hover:border-secondary'
                                 }`}
@@ -209,8 +212,8 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                     <Clock size={18} />
                                 </div>
                                 <div>
-                                    <p className="font-semibold text-sm text-primary">Absence Report</p>
-                                    <p className="text-xs text-secondary mt-1">Hours absent, grade deductions, and current standing. At-risk and dropped students get extra warnings.</p>
+                                    <p className="font-semibold text-sm text-primary">{t('email_absence_report')}</p>
+                                    <p className="text-xs text-secondary mt-1">{t('email_absence_report_desc')}</p>
                                 </div>
                             </div>
                         </button>
@@ -221,7 +224,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                 <div className="standard-card">
                     <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border bg-surface flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                            <h2 className="text-xs sm:text-sm font-semibold tracking-tight uppercase text-primary whitespace-nowrap">Select Students</h2>
+                            <h2 className="text-xs sm:text-sm font-semibold tracking-tight uppercase text-primary whitespace-nowrap">{t('email_select_students')}</h2>
                             <span className="text-[11px] sm:text-xs text-secondary font-mono whitespace-nowrap">
                                 {selectedIds.size}/{students.length}
                             </span>
@@ -231,12 +234,12 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                             onClick={toggleAll}
                             className="text-xs font-medium text-secondary hover:text-fg transition-colors px-2 py-1 rounded-sm hover:bg-surface"
                         >
-                            {allSelected ? 'Deselect All' : 'Select All'}
+                            {allSelected ? t('email_deselect_all') : t('email_select_all')}
                         </button>
                     </div>
 
                     <div className="overflow-auto max-h-[420px]">
-                        <table className="w-full text-left text-sm whitespace-nowrap">
+                        <table className="w-full text-start text-sm whitespace-nowrap">
                             <thead className="sticky top-0 bg-bg border-b border-border text-xs uppercase text-secondary z-10">
                                 <tr>
                                     <th className="px-6 py-3 font-medium w-10">
@@ -248,10 +251,10 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                             className="accent-current cursor-pointer"
                                         />
                                     </th>
-                                    <th className="px-4 py-3 font-medium">Student</th>
-                                    <th className="px-4 py-3 font-medium hidden sm:table-cell">Email</th>
-                                    <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">Absent Hrs</th>
-                                    <th className="px-4 py-3 font-medium text-center">Status</th>
+                                    <th className="px-4 py-3 font-medium">{t('table_student')}</th>
+                                    <th className="px-4 py-3 font-medium hidden sm:table-cell">{t('enroll_email')}</th>
+                                    <th className="px-4 py-3 font-medium text-end hidden sm:table-cell">{t('gb_absence_hrs')}</th>
+                                    <th className="px-4 py-3 font-medium text-center">{t('table_status')}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
@@ -281,11 +284,11 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                                 <div className="font-medium text-primary">{s.FullName}</div>
                                                 {/* Mobile-only: show absent hrs below name */}
                                                 <div className="sm:hidden text-[11px] font-mono text-secondary mt-0.5">
-                                                    {s.hoursAbsent.toFixed(1)} hrs absent
+                                                    {s.hoursAbsent.toFixed(1)} {t('email_hrs_absent')}
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3 text-secondary text-xs font-mono hidden sm:table-cell">{s.Email}</td>
-                                            <td className={`px-4 py-3 text-right font-mono text-sm hidden sm:table-cell ${s.isDropped ? 'text-red-500 font-bold' : s.isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'
+                                            <td className={`px-4 py-3 text-end font-mono text-sm hidden sm:table-cell ${s.isDropped ? 'text-red-500 font-bold' : s.isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'
                                                 }`}>
                                                 {s.hoursAbsent.toFixed(1)}
                                             </td>
@@ -297,11 +300,11 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                                         : 'border-border bg-surface text-secondary'
                                                     }`}>
                                                     {s.isDropped ? (
-                                                        <>Dropped</>
+                                                        <>{t('gb_status_dropped')}</>
                                                     ) : s.isAtRisk ? (
-                                                        <><AlertTriangle size={11} /> At Risk</>
+                                                        <><AlertTriangle size={11} /> {t('gb_status_at_risk')}</>
                                                     ) : (
-                                                        'Good'
+                                                        t('gb_status_passing')
                                                     )}
                                                 </span>
                                             </td>
@@ -324,19 +327,19 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                         {sending ? (
                             <>
                                 <Loader2 size={16} className="animate-spin" />
-                                Sending…
+                                {t('email_sending')}
                             </>
                         ) : (
                             <>
                                 <Send size={16} />
-                                Send to {selectedIds.size} Student{selectedIds.size !== 1 ? 's' : ''}
+                                {t('email_send_to')} {selectedIds.size} {selectedIds.size !== 1 ? t('email_students') : t('email_student')}
                             </>
                         )}
                     </button>
 
                     {emailType && !sending && (
                         <span className="text-xs text-secondary">
-                            Type: <span className="font-medium text-fg">{emailType === 'grade_report' ? 'Grade Report' : 'Absence Report'}</span>
+                            {t('email_type_prefix')} <span className="font-medium text-fg">{emailType === 'grade_report' ? t('email_grade_report') : t('email_absence_report')}</span>
                         </span>
                     )}
                 </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { UserCheck, Eye, EyeOff, Fingerprint } from 'lucide-react'
 import { normalizeApiBase } from '../hooks/useApi'
+import { useTranslation } from '../lib/i18n'
 
 /* ── WebAuthn browser helpers ────────────────────────────────────────────── */
 function b64urlToBuffer(b64url) {
@@ -64,6 +65,8 @@ export function LoginPage({ apiBase, onLogin }) {
         )
     }, [])
 
+    const { t } = useTranslation()
+
     const base = normalizeApiBase(apiBase)
 
     const handleSubmit = async (e) => {
@@ -77,10 +80,10 @@ export function LoginPage({ apiBase, onLogin }) {
                 body: JSON.stringify({ username, password }),
             })
             const data = await res.json()
-            if (!res.ok) throw new Error(data?.detail || 'Login failed')
+            if (!res.ok) throw new Error(data?.detail || t('login_failed'))
             onLogin(data)
         } catch (err) {
-            setError(err.message)
+            setError(err.message || t('login_failed'))
         } finally {
             setLoading(false)
         }
@@ -95,7 +98,7 @@ export function LoginPage({ apiBase, onLogin }) {
                 method: 'POST',
             })
             const beginData = await beginRes.json()
-            if (!beginRes.ok) throw new Error(beginData?.detail || 'Failed to start biometric login')
+            if (!beginRes.ok) throw new Error(beginData?.detail || t('login_biometric_start_failed'))
 
             // 2. Browser shows its own passkey picker (no username needed)
             const assertion = await navigator.credentials.get({
@@ -112,15 +115,15 @@ export function LoginPage({ apiBase, onLogin }) {
                 }),
             })
             const completeData = await completeRes.json()
-            if (!completeRes.ok) throw new Error(completeData?.detail || 'Biometric verification failed')
+            if (!completeRes.ok) throw new Error(completeData?.detail || t('login_biometric_verify_failed'))
             onLogin(completeData)
         } catch (err) {
             if (err.name === 'NotAllowedError') {
-                setError('Biometric prompt was dismissed.')
+                setError(t('login_biometric_dismissed'))
             } else if (err.name === 'NotSupportedError' || err.name === 'InvalidStateError') {
-                setError('No passkey found. Register one in Settings first.')
+                setError(t('login_no_passkey'))
             } else {
-                setError(err.message || 'Biometric login failed.')
+                setError(err.message || t('login_biometric_error'))
             }
         } finally {
             setBiometricLoading(false)
@@ -134,7 +137,7 @@ export function LoginPage({ apiBase, onLogin }) {
                     <div className="flex items-center justify-center gap-2.5 mb-3">
                         <UserCheck size={28} className="text-fg" />
                         <h1 className="font-mono font-bold text-2xl tracking-tight text-fg">
-                            Attendance
+                            {t('app_name')}
                         </h1>
                     </div>
                 </div>
@@ -149,14 +152,14 @@ export function LoginPage({ apiBase, onLogin }) {
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-fg mb-1.5">
-                                Username
+                                {t('login_username')}
                             </label>
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 className="ui-input w-full"
-                                placeholder="Enter your username"
+                                placeholder={t('login_username_ph')}
                                 required
                                 autoFocus
                                 autoComplete="username"
@@ -165,21 +168,21 @@ export function LoginPage({ apiBase, onLogin }) {
 
                         <div>
                             <label className="block text-sm font-medium text-fg mb-1.5">
-                                Password
+                                {t('login_password')}
                             </label>
                             <div className="relative">
                                 <input
                                     type={showPassword ? 'text' : 'password'}
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="ui-input w-full pr-10"
-                                    placeholder="Enter your password"
+                                    className="ui-input w-full pe-10"
+                                    placeholder={t('login_password_ph')}
                                     autoComplete="current-password"
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword((v) => !v)}
-                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors"
+                                    className="absolute end-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-fg transition-colors"
                                     tabIndex={-1}
                                 >
                                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -192,7 +195,7 @@ export function LoginPage({ apiBase, onLogin }) {
                             disabled={loading || !username || !password}
                             className="btn-primary w-full h-10"
                         >
-                            {loading ? 'Signing in\u2026' : 'Sign In'}
+                            {loading ? t('login_signing_in') : t('login_signin')}
                         </button>
                     </form>
 
@@ -200,7 +203,7 @@ export function LoginPage({ apiBase, onLogin }) {
                         <>
                             <div className="flex items-center gap-3">
                                 <div className="flex-1 h-px bg-border" />
-                                <span className="text-[11px] text-secondary">or</span>
+                                <span className="text-[11px] text-secondary">{t('login_or')}</span>
                                 <div className="flex-1 h-px bg-border" />
                             </div>
                             <button
@@ -210,7 +213,7 @@ export function LoginPage({ apiBase, onLogin }) {
                                 className="w-full h-10 flex items-center justify-center gap-2 border border-border rounded-sm text-sm font-medium text-secondary hover:text-fg hover:bg-fg/5 transition-colors cursor-pointer disabled:opacity-40"
                             >
                                 <Fingerprint size={16} />
-                                {biometricLoading ? 'Verifying\u2026' : 'Sign in with biometrics'}
+                                {biometricLoading ? t('status_verifying') : t('login_passkey')}
                             </button>
                         </>
                     )}

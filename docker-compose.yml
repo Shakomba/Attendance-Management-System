@@ -75,6 +75,13 @@ services:
       # Flat photo = ~0.0 dist. Threshold of 0.06 catches photos while allowing moderate turns.
       ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.06"
 
+      # Anti-spoofing — thresholds matching commit e16cd0b
+      ANTISPOOF_ENABLED: "true"
+      ANTISPOOF_LAPLACIAN_THRESHOLD: "80.0"
+      ANTISPOOF_LBP_THRESHOLD: "0.004"
+      ANTISPOOF_FREQUENCY_THRESHOLD: "0.35"
+      ANTISPOOF_COMBINED_THRESHOLD: "0.45"
+
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

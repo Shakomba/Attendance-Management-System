@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -24,7 +26,9 @@
 
 @layer base {
   body {
-    @apply bg-bg text-fg min-h-screen font-sans antialiased transition-colors duration-200;
+    @apply bg-bg text-fg min-h-screen antialiased transition-colors duration-200;
+    font-family: 'Vazirmatn', system-ui, sans-serif;
+    scrollbar-gutter: stable;
   }
 }
 

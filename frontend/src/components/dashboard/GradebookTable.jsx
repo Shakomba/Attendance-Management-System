@@ -1,16 +1,17 @@
-import { Edit2, ShieldAlert, AlertTriangle } from 'lucide-react'
+import { Edit2, ShieldAlert, Search } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from '../../lib/i18n'
 
 /* ── Shared helpers ──────────────────────────────────────────────── */
 const preFinalColumns = [
-  { key: "Quiz1", label: "Q1", field: "quiz1", max: 6 },
-  { key: "Quiz2", label: "Q2", field: "quiz2", max: 6 },
-  { key: "ProjectGrade", label: "PRJ", field: "project", max: 12 },
-  { key: "AssignmentGrade", label: "ASSN", field: "assignment", max: 6 },
-  { key: "MidtermGrade", label: "MID", field: "midterm", max: 20 },
+  { key: "Quiz1", labelKey: "gb_quiz1", field: "quiz1", max: 6 },
+  { key: "Quiz2", labelKey: "gb_quiz2", field: "quiz2", max: 6 },
+  { key: "ProjectGrade", labelKey: "gb_project", field: "project", max: 12 },
+  { key: "AssignmentGrade", labelKey: "gb_assignment", field: "assignment", max: 6 },
+  { key: "MidtermGrade", labelKey: "gb_midterm", field: "midterm", max: 20 },
 ];
 const finalColumns = [
-  { key: "FinalExamGrade", label: "FIN", field: "final_exam", max: 50 },
+  { key: "FinalExamGrade", labelKey: "gb_total", field: "final_exam", max: 50 },
 ];
 
 function computeRow(row) {
@@ -32,6 +33,7 @@ function computeRow(row) {
 
 /* ── Mobile card for a single student ────────────────────────────── */
 function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit, cancelGradeEdit, updateGradeDraftField, saveGradeEdit }) {
+  const { t } = useTranslation()
   const { isDropped, isAtRisk, preFinal50, total100 } = computeRow(row);
   const [expanded, setExpanded] = useState(false);
 
@@ -58,25 +60,17 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
       >
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-primary text-sm truncate">{row.FullName}</div>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="mt-1">
             <span className={`text-lg font-bold font-mono ${Number(total100) < 50 ? 'text-red-500' : 'text-primary'}`}>
               {total100}
-              <span className="text-[10px] font-normal text-secondary ml-0.5">/100</span>
-            </span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium border ${isDropped
-              ? 'border-red-500/40 bg-red-500/15 text-red-500'
-              : isAtRisk
-                ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
-                : 'border-border bg-surface text-secondary'
-              }`}>
-              {isDropped ? <>Dropped</> : isAtRisk ? <><AlertTriangle size={10} /> At Risk</> : 'Good'}
+              <span className="text-[10px] font-normal text-secondary ms-0.5">/100</span>
             </span>
           </div>
         </div>
         {!isEditing && (
           <button
             onClick={(e) => { e.stopPropagation(); startGradeEdit(row); }}
-            className="p-2 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg transition-all cursor-pointer shrink-0 ml-2"
+            className="p-2 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg transition-all cursor-pointer shrink-0 ms-2"
             title="Edit Grades"
           >
             <Edit2 size={14} />
@@ -95,7 +89,7 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
               const isFailed = !isEditing && val !== "-" && c.max && Number(val) < c.max / 2;
               return (
                 <div key={c.key} className="flex flex-col">
-                  <span className="text-[10px] uppercase text-secondary font-medium">{c.label} <span className="opacity-50">/{c.max}</span></span>
+                  <span className="text-[10px] uppercase text-secondary font-medium">{t(c.labelKey)} <span className="opacity-50">/{c.max}</span></span>
                   {isEditing ? (
                     <input type="number" step="0.1" min="0" max={c.max || 100}
                       className="ui-input text-sm font-mono mt-0.5 w-full"
@@ -110,7 +104,7 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
             })}
             {/* Absence hours */}
             <div className="flex flex-col">
-              <span className="text-[10px] uppercase text-secondary font-medium">Absent <span className="opacity-50">hrs</span></span>
+              <span className="text-[10px] uppercase text-secondary font-medium">{t('gb_absence_hrs')}</span>
               {isEditing ? (
                 <input type="number" step="1" min="0"
                   className="ui-input text-sm font-mono mt-0.5 w-full"
@@ -125,7 +119,7 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
             </div>
             {/* Pre-Final */}
             <div className="flex flex-col">
-              <span className="text-[10px] uppercase text-secondary font-medium">Pre-Fin <span className="opacity-50">/50</span></span>
+              <span className="text-[10px] uppercase text-secondary font-medium">{t('gb_pre_fin_short')}</span>
               <span className={`font-mono text-sm ${Number(preFinal50) < 25 ? 'text-red-500 font-bold' : 'text-fg'}`}>{preFinal50}</span>
             </div>
           </div>
@@ -134,10 +128,10 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
           {isEditing && (
             <div className="flex gap-2 pt-1">
               <button onClick={() => saveGradeEdit(row.StudentID)} disabled={isSaving} className="btn-primary flex-1 h-9 text-sm">
-                {isSaving ? "..." : "Save"}
+                {isSaving ? "..." : t('gb_action_save')}
               </button>
               <button onClick={cancelGradeEdit} disabled={isSaving} className="btn-secondary flex-1 h-9 text-sm">
-                Cancel
+                {t('gb_action_cancel')}
               </button>
             </div>
           )}
@@ -157,23 +151,40 @@ export function GradebookTable({
   updateGradeDraftField,
   saveGradeEdit,
 }) {
+  const { t } = useTranslation()
+  const [search, setSearch] = useState('')
+
   if (!gradebook?.length) {
     return (
       <div className="standard-card p-10 flex flex-col items-center justify-center text-secondary border-dashed">
         <ShieldAlert size={32} className="mb-4 opacity-50" />
-        <p>No Gradebook Data Available</p>
+        <p>{t('gb_no_data')}</p>
       </div>
     );
   }
+
+  const filtered = search.trim()
+    ? gradebook.filter(row => row.FullName?.toLowerCase().includes(search.trim().toLowerCase()))
+    : gradebook
 
   return (
     <>
       {/* ── Mobile card list (below lg) ────────────────────────────── */}
       <div className="lg:hidden space-y-3">
-        <div className="px-1 mb-1">
-          <h2 className="text-sm font-semibold tracking-tight uppercase text-primary">Master Gradebook</h2>
+        <div className="px-1 mb-2 flex flex-col gap-2">
+          <h2 className="text-sm font-semibold tracking-tight uppercase text-primary">{t('gb_master_title')}</h2>
+          <div className="relative">
+            <Search size={13} className="absolute start-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={t('gb_search_placeholder')}
+              className="ui-input w-full ps-7 py-1.5 text-xs"
+            />
+          </div>
         </div>
-        {gradebook.map((row) => (
+        {filtered.map((row) => (
           <MobileGradeCard
             key={row.StudentID}
             row={row}
@@ -190,29 +201,38 @@ export function GradebookTable({
 
       {/* ── Desktop table (lg+) ────────────────────────────────────── */}
       <div className="standard-card hidden lg:block">
-        <div className="px-6 py-4 border-b border-border bg-surface">
-          <h2 className="text-sm font-semibold tracking-tight uppercase text-primary">Master Gradebook</h2>
+        <div className="px-6 py-4 border-b border-border bg-surface flex items-center justify-between gap-4">
+          <h2 className="text-sm font-semibold tracking-tight uppercase text-primary shrink-0">{t('gb_master_title')}</h2>
+          <div className="relative w-56">
+            <Search size={13} className="absolute start-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={t('gb_search_placeholder')}
+              className="ui-input w-full ps-7 py-1.5 text-xs"
+            />
+          </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+          <table className="w-full text-start text-sm whitespace-nowrap">
             <thead className="bg-bg border-b border-border text-xs uppercase text-secondary">
               <tr>
-                <th className="px-6 py-3 font-medium sticky left-0 bg-bg z-10 border-r border-border min-w-[200px]">Student</th>
+                <th className="px-6 py-3 font-medium sticky start-0 bg-bg z-10 border-e border-border min-w-[200px]">{t('table_student')}</th>
                 {preFinalColumns.map((c) => (
-                  <th key={c.key} className="px-4 py-3 font-medium text-center">{c.label}</th>
+                  <th key={c.key} className="px-4 py-3 font-medium text-center">{t(c.labelKey)}</th>
                 ))}
-                <th className="px-4 py-3 font-medium text-center">Abs (hrs)</th>
-                <th className="px-4 py-3 font-medium text-center text-primary">Pre-Final /50</th>
+                <th className="px-4 py-3 font-medium text-center">{t('gb_absence_hrs')}</th>
+                <th className="px-4 py-3 font-medium text-center text-primary">{t('gb_pre_final_col')}</th>
                 {finalColumns.map((c) => (
-                  <th key={c.key} className="px-4 py-3 font-medium text-center">{c.label}</th>
+                  <th key={c.key} className="px-4 py-3 font-medium text-center">{t(c.labelKey)}</th>
                 ))}
-                <th className="px-4 py-3 font-medium text-center font-bold">Total /100</th>
-                <th className="px-4 py-3 font-medium text-center">Status</th>
-                <th className="px-6 py-3 text-right">Actions</th>
+                <th className="px-4 py-3 font-medium text-center font-bold">{t('gb_total_100')}</th>
+                <th className="px-6 py-3 text-end">{t('table_actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {gradebook.map((row) => {
+              {filtered.map((row) => {
                 const isEditing = gradeEditor?.studentId === row.StudentID;
                 const isSaving = gradeBusyByStudent[row.StudentID];
                 const { isDropped, isAtRisk, preFinal50, total100 } = computeRow(row);
@@ -231,7 +251,7 @@ export function GradebookTable({
 
                 return (
                   <tr key={row.StudentID} className={`transition-colors ${rowBg}`}>
-                    <td className="px-6 py-3 sticky left-0 z-10 border-r border-border font-medium" style={stickyStyle}>
+                    <td className="px-6 py-3 sticky start-0 z-10 border-e border-border font-medium" style={stickyStyle}>
                       <div className="text-primary">{row.FullName}</div>
                     </td>
 
@@ -289,24 +309,7 @@ export function GradebookTable({
                       {total100}
                     </td>
 
-                    <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border w-20 ${isDropped
-                        ? 'border-red-500/40 bg-red-500/15 text-red-500'
-                        : isAtRisk
-                          ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
-                          : 'border-border bg-surface text-secondary'
-                        }`}>
-                        {isDropped ? (
-                          <>Dropped</>
-                        ) : isAtRisk ? (
-                          <><AlertTriangle size={11} /> At Risk</>
-                        ) : (
-                          'Good'
-                        )}
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-6 py-3 text-end">
                       {isEditing ? (
                         <div className="flex justify-end gap-2">
                           <button
@@ -314,14 +317,14 @@ export function GradebookTable({
                             disabled={isSaving}
                             className="btn-primary"
                           >
-                            {isSaving ? "..." : "Save"}
+                            {isSaving ? "..." : t('gb_action_save')}
                           </button>
                           <button
                             onClick={cancelGradeEdit}
                             disabled={isSaving}
                             className="btn-secondary"
                           >
-                            Cancel
+                            {t('gb_action_cancel')}
                           </button>
                         </div>
                       ) : (

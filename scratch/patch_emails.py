@@ -1,15 +1,6 @@
-from __future__ import annotations
+import re
 
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from typing import Any, Dict, List, Tuple
-
-from ..config import settings
-from ..repos import Repository
-
-
-
+TRANSLATIONS = """
 T = {
     "en": {
         "at_risk_title": "⚠ At Risk",
@@ -84,46 +75,24 @@ T = {
         "hr_s": "کاتژمێر",
     }
 }
+"""
 
-class EmailService:
-    def __init__(self, repository: Repository) -> None:
-        self.repository = repository
+with open("backend/app/services/email_service.py", "r", encoding="utf-8") as f:
+    text = f.read()
 
-    @staticmethod
-    def _build_subject(course_code: str, student_name: str) -> str:
-        return f"Attendance Update - {course_code} - {student_name}"
+# Insert T
+text = text.replace("class EmailService:\n", TRANSLATIONS + "\nclass EmailService:\n")
 
-    # ── Shared style constants ───────────────────────────────────────
+# Replace _STYLE_BODY
+text = text.replace(
+    '_STYLE_BODY = \'font-family: "Segoe UI", Arial, sans-serif; color: #1f2937; background: #f9fafb; margin: 0; padding: 32px 0;\'',
+    '_STYLE_BODY = \'font-family: "Vazirmatn", "Segoe UI", Arial, sans-serif; color: #1f2937; background: #f9fafb; margin: 0; padding: 32px 0;\''
+)
 
-    _STYLE_BODY = 'font-family: "Vazirmatn", "Segoe UI", Arial, sans-serif; color: #1f2937; background: #f9fafb; margin: 0; padding: 32px 0;'
-    _STYLE_CARD = "background: #ffffff; max-width: 560px; margin: 0 auto; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;"
-    _STYLE_HEADER = "padding: 24px 28px 16px; border-bottom: 1px solid #e5e7eb;"
-    _STYLE_SECTION = "padding: 20px 28px;"
-    _STYLE_TABLE = "border-collapse: collapse; width: 100%;"
-    _STYLE_TH = "padding: 8px 12px; border: 1px solid #e5e7eb; background: #f9fafb; text-align: left; font-size: 13px; font-weight: 600; color: #374151;"
-    _STYLE_TD = "padding: 8px 12px; border: 1px solid #e5e7eb; font-size: 13px; color: #4b5563;"
-    _STYLE_TD_BOLD = "padding: 8px 12px; border: 1px solid #e5e7eb; font-size: 13px; font-weight: 700; color: #111827;"
-
-    _BANNER_AT_RISK = """
-    <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px;">
-        <strong style="color: #92400e;">⚠ At Risk</strong>
-        <p style="margin: 4px 0 0; font-size: 13px; color: #92400e;">
-            Your current standing places you at academic risk. Please reach out to your instructor to discuss how to improve.
-        </p>
-    </div>
-    """
-
-    _BANNER_DROPPED = """
-    <div style="background: #fee2e2; border: 1px solid #ef4444; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px;">
-        <strong style="color: #991b1b;">🚫 Dropped — Excessive Absences</strong>
-        <p style="margin: 4px 0 0; font-size: 13px; color: #991b1b;">
-            You have exceeded the maximum allowed absent hours for this course. You are considered dropped from the course.
-            Please contact your academic advisor immediately to discuss your options.
-        </p>
-    </div>
-    """
-
-    @staticmethod
+# Replace status_banner
+text = re.sub(
+    r"@staticmethod\n\s+def _status_banner\(student: Dict\) -> str:\n.*?return \"\"(?:(?!\s*# ──).)*",
+    """@staticmethod
     def _status_banner(student: Dict, lang: str = "en") -> str:
         hours_absent = float(student.get("HoursAbsentTotal", 0) or 0)
         is_dropped = hours_absent >= 5
@@ -148,11 +117,14 @@ class EmailService:
             </div>
             '''
         return ""
+""",
+    text, flags=re.DOTALL
+)
 
-
-    # ── Session-end notification (absent / late students only) ──────
-
-    @classmethod
+# replace _build_session_notification_html
+text = re.sub(
+    r"@classmethod\n\s+def _build_session_notification_html\(cls, student: Dict\) -> str:\n.*?</body></html>\"\"\"",
+    """@classmethod
     def _build_session_notification_html(cls, student: Dict, lang: str = "en") -> str:
         banner = cls._status_banner(student, lang)
         td = T.get(lang, T["en"])
@@ -191,11 +163,14 @@ class EmailService:
     <p style="margin:0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
   </div>
 </div>
-</body></html>'''
+</body></html>'''""",
+    text, flags=re.DOTALL
+)
 
-    # ── New: Grade Report Email ──────────────────────────────────────
-
-    @classmethod
+# Replace _build_grade_report_html
+text = re.sub(
+    r"@classmethod\n\s+def _build_grade_report_html\(cls, student: Dict\) -> str:\n.*?</body></html>\"\"\"",
+    """@classmethod
     def _build_grade_report_html(cls, student: Dict, lang: str = "en") -> str:
         banner = cls._status_banner(student, lang)
         td = T.get(lang, T["en"])
@@ -247,12 +222,14 @@ class EmailService:
     <p style="margin:16px 0 0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
   </div>
 </div>
-</body></html>'''
+</body></html>'''""",
+    text, flags=re.DOTALL
+)
 
-
-    # ── New: Absence Report Email ────────────────────────────────────
-
-    @classmethod
+# Replace _build_absence_report_html
+text = re.sub(
+    r"@classmethod\n\s+def _build_absence_report_html\(cls, student: Dict\) -> str:\n.*?</body></html>\"\"\"",
+    """@classmethod
     def _build_absence_report_html(cls, student: Dict, lang: str = "en") -> str:
         banner = cls._status_banner(student, lang)
         td = T.get(lang, T["en"])
@@ -290,142 +267,36 @@ class EmailService:
     <p style="margin:0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
   </div>
 </div>
-</body></html>'''
+</body></html>'''""",
+    text, flags=re.DOTALL
+)
+
+# Update method signatures in send_absentee_reports
+text = text.replace(
+    'def send_absentee_reports(self, session_id: str) -> Tuple[int, int]:',
+    'def send_absentee_reports(self, session_id: str, lang: str = "en") -> Tuple[int, int]:'
+)
+text = text.replace(
+    'html_body = self._build_session_notification_html(student)',
+    'html_body = self._build_session_notification_html(student, lang)'
+)
+
+# Update send_bulk_emails
+text = text.replace(
+    'def send_bulk_emails(\n        self,\n        students: List[Dict[str, Any]],\n        email_type: str,\n    ) -> Dict[str, Any]:',
+    'def send_bulk_emails(\n        self,\n        students: List[Dict[str, Any]],\n        email_type: str,\n        lang: str = "en",\n    ) -> Dict[str, Any]:'
+)
+text = text.replace(
+    'html_body = self._build_grade_report_html(student)',
+    'html_body = self._build_grade_report_html(student, lang)'
+)
+text = text.replace(
+    'html_body = self._build_absence_report_html(student)',
+    'html_body = self._build_absence_report_html(student, lang)'
+)
 
 
-    # ── Send single email ────────────────────────────────────────────
+with open("backend/app/services/email_service.py", "w", encoding="utf-8") as fw:
+    fw.write(text)
 
-    def _send_email(self, recipient_email: str, subject: str, html_body: str) -> None:
-        message = MIMEMultipart("alternative")
-        message["Subject"] = subject
-        message["From"] = settings.smtp_from
-        message["To"] = recipient_email
-        message.attach(MIMEText(html_body, "html"))
-
-        if settings.smtp_port == 465:
-            smtp_cls = smtplib.SMTP_SSL
-        else:
-            smtp_cls = smtplib.SMTP
-
-        with smtp_cls(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-            if settings.smtp_port != 465 and settings.smtp_use_tls:
-                smtp.starttls()
-            if settings.smtp_user:
-                smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.sendmail(settings.smtp_from, [recipient_email], message.as_string())
-
-    # ── Session-finalize: send to absent + late students ─────────────
-
-    def send_absentee_reports(self, session_id: str, lang: str = "en") -> Tuple[int, int]:
-        students = self.repository.get_absent_and_late_for_session(session_id)
-        sent = 0
-        failed = 0
-
-        for student in students:
-            name = str(student.get("FullName", "Student"))
-            is_late = bool(student.get("IsLate"))
-            status_label = "Late Arrival" if is_late else "Absent"
-
-            subject = f"Attendance Notice ({status_label}) — {name}"
-            html_body = self._build_session_notification_html(student, lang)
-            recipient_email = str(student["Email"])
-            student_id = int(student["StudentID"])
-
-            if settings.smtp_dry_run:
-                self.repository.insert_email_log(
-                    session_id=session_id,
-                    student_id=student_id,
-                    recipient_email=recipient_email,
-                    subject_line=subject,
-                    status="DRY_RUN",
-                    error_message=None,
-                )
-                sent += 1
-                continue
-
-            try:
-                self._send_email(recipient_email, subject, html_body)
-                self.repository.insert_email_log(
-                    session_id=session_id,
-                    student_id=student_id,
-                    recipient_email=recipient_email,
-                    subject_line=subject,
-                    status="SENT",
-                    error_message=None,
-                )
-                sent += 1
-            except Exception as exc:  # pragma: no cover
-                self.repository.insert_email_log(
-                    session_id=session_id,
-                    student_id=student_id,
-                    recipient_email=recipient_email,
-                    subject_line=subject,
-                    status="FAILED",
-                    error_message=str(exc),
-                )
-                failed += 1
-
-        return sent, failed
-
-    # ── New: On-demand bulk email ────────────────────────────────────
-
-    def send_bulk_emails(
-        self,
-        students: List[Dict[str, Any]],
-        email_type: str,
-        lang: str = "en",
-    ) -> Dict[str, Any]:
-        """Send bulk emails. Returns {total, sent, failed, results}."""
-        sent = 0
-        failed = 0
-        results: List[Dict[str, Any]] = []
-
-        for student in students:
-            student_name = str(student.get("FullName", "Student"))
-            recipient = str(student.get("Email", ""))
-            student_id = int(student.get("StudentID", 0))
-
-            if email_type == "grade_report":
-                subject = f"Grade Report — {student_name}"
-                html_body = self._build_grade_report_html(student, lang)
-            else:
-                subject = f"Absence Report — {student_name}"
-                html_body = self._build_absence_report_html(student, lang)
-
-            if settings.smtp_dry_run:
-                results.append({
-                    "student_id": student_id,
-                    "full_name": student_name,
-                    "email": recipient,
-                    "status": "DRY_RUN",
-                    "error": None,
-                })
-                sent += 1
-                continue
-
-            try:
-                self._send_email(recipient, subject, html_body)
-                results.append({
-                    "student_id": student_id,
-                    "full_name": student_name,
-                    "email": recipient,
-                    "status": "SENT",
-                    "error": None,
-                })
-                sent += 1
-            except Exception as exc:
-                results.append({
-                    "student_id": student_id,
-                    "full_name": student_name,
-                    "email": recipient,
-                    "status": "FAILED",
-                    "error": str(exc),
-                })
-                failed += 1
-
-        return {
-            "total": len(students),
-            "sent": sent,
-            "failed": failed,
-            "results": results,
-        }
+print("Patch applied")

@@ -18,6 +18,8 @@ import { SessionHistory } from "./components/dashboard/SessionHistory";
 import { EnrollmentModal } from "./components/enrollment/EnrollmentModal";
 import { EnrollmentTab } from "./components/enrollment/EnrollmentTab";
 import { SettingsTab } from "./components/SettingsTab";
+import { I18nProvider } from "./lib/i18n";
+import { translations } from "./lib/translations";
 
 // Cover: scale to fill the target, cropping the overflow (no black bars)
 function coverRect(sourceW, sourceH, targetW, targetH) {
@@ -179,6 +181,8 @@ export default function App() {
   const sessionStartTimeRef = useRef(null);
   useEffect(() => { sessionStartTimeRef.current = sessionStartTime; }, [sessionStartTime]);
 
+  const t = useCallback((key) => translations[language]?.[key] || translations['en']?.[key] || key, [language]);
+
   // Derived Stats
   const enrolledCount = attendance ? attendance.length : gradebook.length;
   const presentCount = attendance.filter((r) => r.IsPresent).length;
@@ -301,13 +305,13 @@ export default function App() {
 
       let label;
       if (isSpoof) {
-        label = face.full_name || "SPOOF DETECTED";
+        label = face.full_name || t("status_spoof");
       } else if (isVerifying) {
-        label = face.full_name || "Verifying...";
+        label = face.full_name || t("status_verifying");
       } else if (!recognized) {
-        label = "Unknown";
+        label = t("status_unknown");
       } else if (isLate) {
-        label = `${face.full_name || "Student"} — Late (${absentHours}h absent)`;
+        label = `${face.full_name || "Student"} — ${t("status_late")} (${absentHours}h)`;
       } else {
         label = face.full_name || "Student";
       }
@@ -586,11 +590,16 @@ export default function App() {
   };
 
   if (!professor) {
-    return <LoginPage apiBase={apiBase} onLogin={handleLogin} />;
+    return (
+      <I18nProvider language={language}>
+        <LoginPage apiBase={apiBase} onLogin={handleLogin} />
+      </I18nProvider>
+    );
   }
 
   return (
-    <DashboardLayout
+    <I18nProvider language={language}>
+      <DashboardLayout
       activeTab={activeTab}
       setActiveTab={setActiveTab}
       professor={professor}
@@ -604,31 +613,31 @@ export default function App() {
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
           disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
         >
-          {sessionBusy.starting ? "Starting…" : sessionBusy.finalizing ? "Ending…" : sessionId ? "End Lecture" : "Start Lecture"}
+          {sessionBusy.starting ? t("session_starting") : sessionBusy.finalizing ? t("session_ending") : sessionId ? t("session_end") : t("session_start")}
         </button>
       }
     >
       {activeTab === 'dashboard' ? (
-        <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-300">
+        <div className="space-y-4 sm:space-y-6 animate-fade-in">
           <div className="mb-1 sm:mb-2">
             <StatCards
               stats={[
                 {
-                  label: "Enrolled",
+                  label: t("stat_enrolled"),
                   value: enrolledCount,
-                  hint: "Total students registered",
+                  hint: t("stat_enrolled_hint"),
                   variant: "default",
                 },
                 {
-                  label: "Present",
+                  label: t("stat_present"),
                   value: presentCount,
-                  hint: "Detected & checked-in",
+                  hint: t("stat_present_hint"),
                   variant: "primary",
                 },
                 {
-                  label: "Absent",
+                  label: t("stat_absent"),
                   value: absentCount,
-                  hint: sessionId ? "Not yet present" : "No active lecture",
+                  hint: sessionId ? t("stat_absent_hint") : t("stat_absent_inactive"),
                   variant: "danger",
                 },
               ]}
@@ -660,7 +669,7 @@ export default function App() {
           </div>
         </div>
       ) : activeTab === 'enrollment' ? (
-        <div className="animate-in fade-in duration-300">
+        <div className="animate-fade-in">
           <EnrollmentTab
             apiFetch={apiFetch}
             courseId={courseId}
@@ -668,7 +677,7 @@ export default function App() {
           />
         </div>
       ) : activeTab === 'gradebook' ? (
-        <div className="animate-in fade-in duration-300">
+        <div className="animate-fade-in">
           <div className="mt-2">
 
             <GradebookTable
@@ -690,7 +699,7 @@ export default function App() {
 
         </div>
       ) : activeTab === 'email' ? (
-        <div className="animate-in fade-in duration-300">
+        <div className="animate-fade-in">
           <div className="mt-2">
             <EmailPanel
               gradebook={gradebook}
@@ -702,7 +711,7 @@ export default function App() {
           </div>
         </div>
       ) : activeTab === 'history' ? (
-        <div className="animate-in fade-in duration-300">
+        <div className="animate-fade-in">
           <div className="mt-2">
             <SessionHistory apiFetch={apiFetch} courseId={courseId} activeSessionId={sessionId} />
           </div>
@@ -744,5 +753,6 @@ export default function App() {
         />
       )}
     </DashboardLayout>
+    </I18nProvider>
   );
 }
