@@ -52,8 +52,8 @@ services:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
       CORS_ORIGINS: ${CORS_ORIGINS:-https://app.shakomba.org,http://localhost:5173,http://localhost:3000}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
 
-      DEMO_MODE: "true"
       SQL_DRIVER: "ODBC Driver 18 for SQL Server"
       SQL_SERVER: "sqlserver"
       SQL_PORT: "1433"
@@ -91,8 +91,6 @@ services:
       SMTP_DRY_RUN: ${SMTP_DRY_RUN:-true}
     volumes:
       - ./backend/app:/app/app
-      - ./student_photos:/app/student_photos
-      - demo_state:/app/demo_data
       - insightface_models:/root/.insightface
       - /usr/lib/wsl:/usr/lib/wsl:ro
     devices:
@@ -148,7 +146,6 @@ services:
 volumes:
   mssql_data:
   insightface_models:
-  demo_state:
 
 networks:
   ams_net:

@@ -20,7 +20,6 @@ from starlette.responses import Response
 from .auth import create_access_token, decode_token, get_current_professor
 from .config import settings
 from . import webauthn_service as _wa
-from .demo_repo import DemoRepository
 from .repos import Repository
 from .schemas import (
     BulkEmailRequest,
@@ -53,7 +52,7 @@ _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # ---------------------------------------------------------------------------
 # Infrastructure
 # ---------------------------------------------------------------------------
-repo = DemoRepository() if settings.demo_mode else Repository()
+repo = Repository()
 ws_manager = WebSocketManager()
 email_service = EmailService(repo)
 
@@ -77,12 +76,6 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(application):
     """Run startup logic then yield to handle requests."""
-    if settings.demo_mode and face_engine and hasattr(repo, "bootstrap_embeddings_from_folder"):
-        try:
-            stats = repo.bootstrap_embeddings_from_folder(face_engine)
-            print(f"[startup] Demo embedding bootstrap: {stats}")
-        except Exception as exc:  # pragma: no cover
-            print(f"[startup] Demo embedding bootstrap failed: {exc}")
     repo.ensure_webauthn_table()
     yield
 
