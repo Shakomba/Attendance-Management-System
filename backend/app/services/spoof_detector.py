@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,6 +8,8 @@ import cv2
 import numpy as np
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -84,6 +87,8 @@ class SpoofDetector:
 
         is_live = confidence >= self.combined_threshold
         reason = ";".join(reasons) if not is_live else ""
+
+        logger.warning("SPOOF lap=%.1f lbp=%.4f freq=%.4f conf=%.3f live=%s", lap_var, lbp_score, freq_score, confidence, is_live)
 
         return SpoofResult(
             is_live=is_live,
