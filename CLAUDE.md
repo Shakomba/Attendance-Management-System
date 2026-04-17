@@ -39,9 +39,8 @@ Attendance-Management-System/
 │   └── Dockerfile.backend-gpu   # GPU image (CUDA + cuDNN layered on base)
 ├── database/
 │   └── 01_init_schema.sql       # Full SQL Server schema + stored procedures + views
-├── doorway_client/
-│   └── camera_client.py         # Standalone camera streaming client
-└── student_photos/              # Drop student photos here for embedding
+└── database/
+    └── 01_init_schema.sql       # Full SQL Server schema + stored procedures + views
 ```
 
 ---
@@ -81,12 +80,6 @@ cd frontend/
 npm install
 npm run dev       # dev server at http://localhost:5173
 npm run build     # production bundle
-```
-
-### Camera Client (optional — runs on doorway machine)
-```bash
-cd doorway_client/
-python camera_client.py --server ws://localhost:8000 --session <SESSION_ID> --camera 0 --fps 5
 ```
 
 ### Database
