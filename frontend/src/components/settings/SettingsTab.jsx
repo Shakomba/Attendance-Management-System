@@ -4,7 +4,7 @@ import {
     Download, Upload, CheckCircle2, Fingerprint, Trash2, Plus,
     Lock, ChevronDown, ChevronUp, Mail, Check,
 } from 'lucide-react'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation } from '../../lib/i18n'
 
 const LANGUAGES = [
     { code: 'en',  native: 'English' },

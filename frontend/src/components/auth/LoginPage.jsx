@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { UserCheck, Eye, EyeOff, Fingerprint } from 'lucide-react'
-import { normalizeApiBase } from '../hooks/useApi'
-import { useTranslation } from '../lib/i18n'
+import { normalizeApiBase } from '../../hooks/useApi'
+import { useTranslation } from '../../lib/i18n'
 
 /* ── WebAuthn browser helpers ────────────────────────────────────────────── */
 function b64urlToBuffer(b64url) {
