@@ -63,26 +63,28 @@ class SpoofDetector:
         lbp_score = self._lbp_texture_score(gray)
         freq_score = self._frequency_analysis(gray)
 
-        # Normalize each metric to 0..1 where 1 = live.
-        lap_norm = min(1.0, lap_var / max(self.laplacian_threshold * 2, 1e-9))
-        lbp_norm = min(1.0, lbp_score / max(self.lbp_threshold * 2, 1e-9))
-        freq_norm = min(1.0, freq_score / max(self.frequency_threshold * 2, 1e-9))
-
-        confidence = (
-            self._W_LAPLACIAN * lap_norm
-            + self._W_LBP * lbp_norm
-            + self._W_FREQUENCY * freq_norm
-        )
+        # Hard gates: ALL must pass. A high LBP cannot compensate for a low laplacian.
+        # Calibrated from measured data:
+        #   photo:     lap=106-276, freq=0.40-0.43
+        #   real face: lap=329-466, freq=0.46-0.51
+        lap_ok  = lap_var   >= self.laplacian_threshold   # photo fails here
+        freq_ok = freq_score >= self.frequency_threshold   # photo fails here
+        lbp_ok  = lbp_score >= self.lbp_threshold         # secondary check
 
         reasons = []
-        if lap_var < self.laplacian_threshold:
-            reasons.append(f"laplacian={lap_var:.1f}")
-        if lbp_score < self.lbp_threshold:
-            reasons.append(f"lbp={lbp_score:.3f}")
-        if freq_score < self.frequency_threshold:
-            reasons.append(f"freq={freq_score:.3f}")
+        if not lap_ok:
+            reasons.append(f"laplacian={lap_var:.1f}<{self.laplacian_threshold}")
+        if not freq_ok:
+            reasons.append(f"freq={freq_score:.3f}<{self.frequency_threshold}")
+        if not lbp_ok:
+            reasons.append(f"lbp={lbp_score:.4f}<{self.lbp_threshold}")
 
-        is_live = confidence >= self.combined_threshold
+        is_live = lap_ok and freq_ok and lbp_ok
+        # Confidence is still useful for logging/display even though decision is hard-gate.
+        confidence = (lap_var / max(self.laplacian_threshold, 1e-9) * self._W_LAPLACIAN
+                      + freq_score / max(self.frequency_threshold, 1e-9) * self._W_FREQUENCY
+                      + lbp_score / max(self.lbp_threshold, 1e-9) * self._W_LBP)
+        confidence = round(min(1.0, confidence / (self._W_LAPLACIAN + self._W_FREQUENCY + self._W_LBP)), 4)
         reason = ";".join(reasons) if not is_live else ""
 
         return SpoofResult(

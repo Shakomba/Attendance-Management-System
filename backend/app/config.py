@@ -44,14 +44,14 @@ class Settings:
 
     # Anti-spoofing
     antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "true"), True)
-    # Calibrated from real data: photo lap=106-276, real lap=329-466
+    # Hard gates — ALL must pass (no weighted averaging).
+    # Calibrated: photo lap=106-276, real lap=329-466 → threshold=300
     antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "300.0"))
-    # LBP overlaps between photo/real — not a reliable separator, keep loose
-    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.005"))
-    # photo freq=0.40-0.43, real freq=0.46-0.51 — clear gap at 0.45
+    # LBP similar between photo/real (both ~0.010) — keep as loose secondary gate
+    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.008"))
+    # photo freq=0.40-0.43, real freq=0.46-0.51 → threshold=0.45
     antispoof_frequency_threshold: float = float(os.getenv("ANTISPOOF_FREQUENCY_THRESHOLD", "0.45"))
-    # photo conf=0.77-0.91, real conf=0.91-0.93 — threshold just below real minimum
-    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.91"))
+    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.91"))  # unused, kept for compat
 
     # Enrollment
     enrollment_pose_distance_threshold: float = float(os.getenv("ENROLLMENT_POSE_DISTANCE_THRESHOLD", "0.15"))
