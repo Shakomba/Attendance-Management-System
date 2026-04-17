@@ -6,17 +6,15 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: "Developer"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_TCP_PORT: "1433"
     volumes:
       - mssql_data:/var/opt/mssql
-    ports:
-      - "${SQL_PORT_HOST:-1433}:1433"
     networks:
       - ams_net
 
-  # Run once when you need to (re)initialize schema:
-  # docker compose -f docker-compose.yml --profile db-init up sql-init
+  # Run once to initialize schema:
+  # docker compose --profile db-init up sql-init
   sql-init:
     image: mcr.microsoft.com/mssql-tools
     container_name: ams_sql_init
@@ -24,7 +22,7 @@ services:
     depends_on:
       - sqlserver
     environment:
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
     volumes:
       - ./database:/scripts:ro
     command: >
@@ -44,14 +42,14 @@ services:
   backend:
     container_name: ams_backend
     restart: unless-stopped
-    runtime: nvidia  # Uncomment after reboot to enable GPU mode
+    runtime: nvidia
     image: ams_backend_gpu:latest
     depends_on:
       - sqlserver
     environment:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.shakomba.org,http://localhost:5173,http://localhost:3000}
+      CORS_ORIGINS: "https://attendify.tech"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
 
       SQL_DRIVER: "ODBC Driver 18 for SQL Server"
@@ -59,44 +57,37 @@ services:
       SQL_PORT: "1433"
       SQL_DATABASE: ${SQL_DATABASE:-AttendanceAI}
       SQL_USER: "sa"
-      SQL_PASSWORD: ${MSSQL_SA_PASSWORD:-fbvN(<@mZLA;Qu5[}
+      SQL_PASSWORD: ${MSSQL_SA_PASSWORD}
       SQL_TRUST_SERVER_CERT: "yes"
 
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      LD_LIBRARY_PATH: "/usr/lib/wsl/lib:/usr/local/cuda/lib64"
+      LD_LIBRARY_PATH: "/usr/local/cuda/lib64"
       AI_MODE: "gpu"
-      CPU_FACE_DETECT_MODEL: ${CPU_FACE_DETECT_MODEL:-hog}
-      CPU_DISTANCE_THRESHOLD: ${CPU_DISTANCE_THRESHOLD:-0.45}
       GPU_COSINE_THRESHOLD: ${GPU_COSINE_THRESHOLD:-0.55}
       RECOGNITION_FRAME_STRIDE: ${RECOGNITION_FRAME_STRIDE:-1}
       RECOGNITION_EVENT_COOLDOWN_SEC: ${RECOGNITION_EVENT_COOLDOWN_SEC:-20}
-      # ArcFace is pose-invariant; same person at different angles ~ 0.05-0.15 cosine dist.
-      # Flat photo = ~0.0 dist. Threshold of 0.06 catches photos while allowing moderate turns.
       ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.06"
 
-      # Anti-spoofing — thresholds matching commit e16cd0b
       ANTISPOOF_ENABLED: "true"
       ANTISPOOF_LAPLACIAN_THRESHOLD: "80.0"
       ANTISPOOF_LBP_THRESHOLD: "0.004"
       ANTISPOOF_FREQUENCY_THRESHOLD: "0.35"
       ANTISPOOF_COMBINED_THRESHOLD: "0.45"
 
+      WEBAUTHN_RP_ID: "attendify.tech"
+      WEBAUTHN_ORIGIN: "https://attendify.tech"
+      WEBAUTHN_RP_NAME: "Attendify"
+
       SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-Attendance Bot <no-reply@example.com>}
+      SMTP_FROM: ${SMTP_FROM:-Attendify <no-reply@attendify.tech>}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
-      SMTP_DRY_RUN: ${SMTP_DRY_RUN:-true}
+      SMTP_DRY_RUN: ${SMTP_DRY_RUN:-false}
     volumes:
-      - ./backend/app:/app/app
       - insightface_models:/root/.insightface
-      - /usr/lib/wsl:/usr/lib/wsl:ro
-    devices:
-      - /dev/dxg
-    ports:
-      - "${API_PORT_HOST:-8000}:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
       interval: 20s
@@ -111,7 +102,7 @@ services:
     build:
       context: .
       args:
-        VITE_API_BASE_URL: https://api.shakomba.org
+        VITE_API_BASE_URL: https://api.attendify.tech
       dockerfile_inline: |
         FROM node:20-alpine AS build
         WORKDIR /app
@@ -127,25 +118,38 @@ services:
         EXPOSE 80
     depends_on:
       - backend
-    ports:
-      - "${WEB_PORT_HOST:-5173}:80"
     networks:
       - ams_net
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: ams_cloudflared
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ams_nginx
     restart: unless-stopped
     depends_on:
       - frontend
       - backend
-    command: tunnel --no-autoupdate run --token eyJhIjoiNGM2ZWI3Y2UwM2NmYzU0ZThiYTU2NTY2YjMwM2VlYzUiLCJ0IjoiNmIyOWQ2ZGMtODQxYy00NjJlLThlMzAtM2MyNzE1NmJhOGM1IiwicyI6IlpqVXpaR1UzWW1VdE9UaGhNUzAwWWpJekxUazNNRGd0TVRaa01USTNObVZqTm1abCJ9
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
     networks:
       - ams_net
+
+  certbot:
+    image: certbot/certbot
+    container_name: ams_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
 
 volumes:
   mssql_data:
   insightface_models:
+  certbot_www:
+  certbot_certs:
 
 networks:
   ams_net:
