@@ -92,7 +92,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./student_photos:/app/student_photos
-      - ./demo_data:/app/demo_data
+      - demo_state:/app/demo_data
       - insightface_models:/root/.insightface
       - /usr/lib/wsl:/usr/lib/wsl:ro
     devices:
@@ -148,6 +148,7 @@ services:
 volumes:
   mssql_data:
   insightface_models:
+  demo_state:
 
 networks:
   ams_net:
