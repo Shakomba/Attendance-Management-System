@@ -32,12 +32,12 @@ _POSE_MIN_PITCH: float = 15.0  # up/down:    |pitch| must reach this
 _POSE_MAX_FRONT: float = 12.0  # front:      both axes must stay within this
 
 # InsightFace yaw/pitch sign convention (empirically verified):
-#   yaw   > 0 → subject turning RIGHT,  yaw   < 0 → turning LEFT
-#   pitch > 0 → subject tilting DOWN,   pitch < 0 → tilting UP
-_YAW_SIGN_RIGHT  =  1   # positive yaw = right
-_YAW_SIGN_LEFT   = -1   # negative yaw = left
-_PITCH_SIGN_DOWN =  1   # positive pitch = down
-_PITCH_SIGN_UP   = -1   # negative pitch = up
+#   yaw   > 0 → subject turning LEFT,   yaw   < 0 → turning RIGHT
+#   pitch > 0 → subject tilting UP,     pitch < 0 → tilting DOWN
+_YAW_SIGN_RIGHT  = -1   # negative yaw = right
+_YAW_SIGN_LEFT   =  1   # positive yaw = left
+_PITCH_SIGN_DOWN = -1   # negative pitch = down
+_PITCH_SIGN_UP   =  1   # positive pitch = up
 
 
 def _pose_angle_ok(pose_tuple: Optional[tuple], instruction: str) -> bool:
