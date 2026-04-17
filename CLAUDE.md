@@ -50,14 +50,13 @@ Attendance-Management-System/
 |-------|-----------|
 | Backend | Python 3.11+, FastAPI 0.115, Uvicorn |
 | Database | SQL Server (pyodbc) |
+| Face Recognition (CPU) | face_recognition 1.3 + HOG detector |
 | Face Recognition (GPU) | InsightFace 0.7.3 + ONNX Runtime GPU + CUDA |
 | Image Processing | OpenCV 4.10 |
 | Validation | Pydantic 2.10 |
 | Frontend | React 18, Vite 6, Tailwind CSS 3 |
 | Icons | Lucide React |
-| Email | smtplib + Resend SMTP |
-| Reverse Proxy | nginx 1.27 + Let's Encrypt SSL |
-| Deployment | Docker Compose on DigitalOcean GPU droplet |
+| Email | smtplib (stdlib) |
 
 ---
 
