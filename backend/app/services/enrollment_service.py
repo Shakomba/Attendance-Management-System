@@ -26,34 +26,44 @@ POSE_INSTRUCTIONS: Dict[str, str] = {
     "down": "Tilt your head DOWN slightly",
 }
 
-# Minimum absolute angle (degrees) required to confirm head has actually moved.
-# Uses magnitude only — no assumed sign convention for left/right.
-# A flat photo reports ~0° on all axes regardless of how it's angled at the camera.
-_POSE_MIN_YAW: float = 15.0   # left / right poses must have |yaw|  >= this
-_POSE_MIN_PITCH: float = 13.0 # up   / down  poses must have |pitch| >= this
-_POSE_MAX_FRONT: float = 22.0 # front pose must have |yaw| AND |pitch| <= this
+# Angle thresholds (degrees).
+_POSE_MIN_YAW: float = 18.0    # left/right: |yaw| must reach this
+_POSE_MIN_PITCH: float = 15.0  # up/down:    |pitch| must reach this
+_POSE_MAX_FRONT: float = 12.0  # front:      both axes must stay within this
+
+# InsightFace yaw/pitch sign convention (empirically verified):
+#   yaw   > 0 → subject turning RIGHT,  yaw   < 0 → turning LEFT
+#   pitch > 0 → subject tilting DOWN,   pitch < 0 → tilting UP
+_YAW_SIGN_RIGHT  =  1   # positive yaw = right
+_YAW_SIGN_LEFT   = -1   # negative yaw = left
+_PITCH_SIGN_DOWN =  1   # positive pitch = down
+_PITCH_SIGN_UP   = -1   # negative pitch = up
 
 
 def _pose_angle_ok(pose_tuple: Optional[tuple], instruction: str) -> bool:
-    """Return True if the detected head pose matches the required instruction angle.
+    """Return True only if the detected head pose matches the required direction AND magnitude.
 
-    Uses absolute (magnitude) checks so the result is independent of InsightFace's
-    sign convention.  Returns True when pose data is unavailable (CPU mode).
+    Checks both sign and magnitude — turning right no longer satisfies "turn left".
+    Returns False when pose data is unavailable (GPU not running), forcing re-check.
     """
     if pose_tuple is None:
-        return True
+        # No pose data means we can't validate — reject rather than silently pass.
+        return False
     try:
         pitch, yaw, _roll = pose_tuple
-        abs_yaw, abs_pitch = abs(yaw), abs(pitch)
         if instruction == "front":
-            return abs_yaw <= _POSE_MAX_FRONT and abs_pitch <= _POSE_MAX_FRONT
-        if instruction in ("left", "right"):
-            return abs_yaw >= _POSE_MIN_YAW
-        if instruction in ("up", "down"):
-            return abs_pitch >= _POSE_MIN_PITCH
+            return abs(yaw) <= _POSE_MAX_FRONT and abs(pitch) <= _POSE_MAX_FRONT
+        if instruction == "left":
+            return yaw * _YAW_SIGN_LEFT > 0 and abs(yaw) >= _POSE_MIN_YAW
+        if instruction == "right":
+            return yaw * _YAW_SIGN_RIGHT > 0 and abs(yaw) >= _POSE_MIN_YAW
+        if instruction == "up":
+            return pitch * _PITCH_SIGN_UP > 0 and abs(pitch) >= _POSE_MIN_PITCH
+        if instruction == "down":
+            return pitch * _PITCH_SIGN_DOWN > 0 and abs(pitch) >= _POSE_MIN_PITCH
     except Exception:
         pass
-    return True
+    return False
 
 
 @dataclass
