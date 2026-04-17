@@ -80,7 +80,6 @@ class SpoofDetector:
             reasons.append(f"lbp={lbp_score:.4f}<{self.lbp_threshold}")
 
         is_live = lap_ok and freq_ok and lbp_ok
-        import logging; logging.getLogger(__name__).warning("SPOOF lap=%.1f freq=%.4f lbp=%.4f live=%s", lap_var, freq_score, lbp_score, is_live)
         # Confidence is still useful for logging/display even though decision is hard-gate.
         confidence = (lap_var / max(self.laplacian_threshold, 1e-9) * self._W_LAPLACIAN
                       + freq_score / max(self.frequency_threshold, 1e-9) * self._W_FREQUENCY
