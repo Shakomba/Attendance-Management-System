@@ -277,7 +277,8 @@ class FaceEngine:
             return None
 
         # Minimum variance to consider "natural" — below this is suspicious.
-        variance_threshold = 0.001 if self.mode == "cpu" else 0.0005
+        # GPU measured: photo variance=0.000189-0.000486, real face higher.
+        variance_threshold = 0.001 if self.mode == "cpu" else 0.0008
 
         best_student_id: Optional[int] = None
         best_full_name: str = ""

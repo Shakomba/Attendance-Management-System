@@ -344,6 +344,9 @@ class RecognitionService:
 
             # ── Step 4: Multi-embedding variance check ─────────────────
             if match.is_suspicious:
+                # Reset pose observations so this student can't accumulate
+                # pose matches across frames that happen to slip past the variance check.
+                self._pose_observations.pop((session_id, match.student_id), None)
                 output.overlays.append(
                     FaceOverlay(
                         event_type="spoof",
