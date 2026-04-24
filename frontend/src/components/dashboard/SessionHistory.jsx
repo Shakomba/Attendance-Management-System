@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { History, ChevronRight, ChevronDown, UserX, Users, Check, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
-import { formatDate, formatTime, formatDuration } from '../../lib/dateFormatter';
+import { formatDate, formatTime, formatDuration, parseDateSafe } from '../../lib/dateFormatter';
 
 function StatusBadge({ status }) {
   const { t } = useTranslation()
@@ -38,8 +38,8 @@ function SessionRow({ session, activeSessionId }) {
   const { t, language } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
-  const startDate = session.started_at ? new Date(session.started_at) : null
-  const endDate = session.ended_at ? new Date(session.ended_at) : null
+  const startDate = parseDateSafe(session.started_at);
+  const endDate = parseDateSafe(session.ended_at);
   const displayStatus = endDate
     ? 'finalized'
     : session.session_id === activeSessionId

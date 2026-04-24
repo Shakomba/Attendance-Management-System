@@ -5,7 +5,7 @@ import {
     Lock, ChevronDown, ChevronUp, Mail, Check,
 } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
-import { formatDate, formatTime } from '../../lib/dateFormatter';
+import { formatDate, formatTime, parseDateSafe } from '../../lib/dateFormatter';
 import { tName } from '../../lib/nameTranslation';
 
 const LANGUAGES = [
@@ -560,7 +560,7 @@ export function SettingsTab({
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-medium text-fg truncate">{pk.device_name}</p>
-                                                    <p className="text-[11px] text-secondary">{t('settings_passkey_added')} {formatDate(new Date(pk.created_at), language, true)}</p>
+                                                    <p className="text-[11px] text-secondary">{t('settings_passkey_added')} {formatDate(parseDateSafe(pk.created_at), language, true)}</p>
                                                 </div>
                                             </div>
                                             <button

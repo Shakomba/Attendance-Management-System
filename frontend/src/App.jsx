@@ -20,6 +20,7 @@ import { EnrollmentTab } from "./components/enrollment/EnrollmentTab";
 import { SettingsTab } from "./components/settings/SettingsTab";
 import { I18nProvider } from "./lib/i18n";
 import { translations } from "./lib/translations";
+import { parseDateSafe } from "./lib/dateFormatter";
 
 // Cover: scale to fill the target, cropping the overflow (no black bars)
 function coverRect(sourceW, sourceH, targetW, targetH) {
@@ -442,7 +443,7 @@ export default function App() {
       const studentId = Number(presencePayload?.student_id);
       if (!Number.isFinite(studentId)) return;
       const eventAt = presencePayload?.recognized_at
-        ? new Date(presencePayload.recognized_at).toISOString()
+        ? parseDateSafe(presencePayload.recognized_at).toISOString()
         : new Date().toISOString();
       setAttendance((prev) =>
         prev.map((row) => {

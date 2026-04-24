@@ -1,7 +1,7 @@
 import { Check, X, HelpCircle, Loader2, Clock } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from '../../lib/i18n'
-import { formatDate, formatTime } from '../../lib/dateFormatter';
+import { formatDate, formatTime, parseDateSafe } from '../../lib/dateFormatter';
 import { tName } from '../../lib/nameTranslation';
 
 export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessionEndTime, markManualAttendance, attendanceBusyByStudent }) {
@@ -106,7 +106,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                               <>
                                 <span className="text-secondary/40">·</span>
                                 <span className="text-[11px] font-mono text-secondary">
-                                  {formatTime(new Date(row.FirstSeenAt), language)}
+                                  {formatTime(parseDateSafe(row.FirstSeenAt), language)}
                                 </span>
                               </>
                             )}
@@ -132,7 +132,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     </td>
 
                     <td className="px-3 py-3 sm:px-6 sm:py-4 text-xs font-mono text-secondary hidden sm:table-cell">
-                      {present && row.FirstSeenAt ? formatTime(new Date(row.FirstSeenAt), language, true) : '-'}
+                      {present && row.FirstSeenAt ? formatTime(parseDateSafe(row.FirstSeenAt), language, true) : '-'}
                     </td>
 
                     {!sessionEnded && (
