@@ -5,6 +5,8 @@ import {
     Lock, ChevronDown, ChevronUp, Mail, Check,
 } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
+import { formatDate, formatTime } from '../../lib/dateFormatter';
+import { tName } from '../../lib/nameTranslation';
 
 const LANGUAGES = [
     { code: 'en',  native: 'English' },
@@ -83,11 +85,12 @@ function Field({ label, hint, children }) {
     )
 }
 
-function Toggle({ checked, onChange }) {
+function Toggle({ checked, onChange, rtl = false }) {
     return (
         <button
             type="button"
             role="switch"
+            dir="ltr"
             aria-checked={checked}
             onClick={() => onChange(!checked)}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-fg/20 ${
@@ -95,7 +98,9 @@ function Toggle({ checked, onChange }) {
             }`}
         >
             <span className={`inline-block h-4 w-4 rounded-full bg-bg shadow-sm transition-transform duration-200 ${
-                checked ? 'translate-x-[22px]' : 'translate-x-[4px]'
+                rtl
+                    ? (checked ? 'translate-x-[4px]' : 'translate-x-[22px]')
+                    : (checked ? 'translate-x-[22px]' : 'translate-x-[4px]')
             }`} />
         </button>
     )
@@ -382,9 +387,6 @@ export function SettingsTab({
         }
     }
 
-    const initials = (professor?.full_name || professor?.username || '?')
-        .split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
-
     /* ── Render ────────────────────────────────────────────────────── */
     return (
         <>
@@ -408,15 +410,12 @@ export function SettingsTab({
                     <div className="standard-card overflow-hidden">
                         {/* Avatar strip */}
                         <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 bg-surface border-b border-border">
-                            <div className="w-11 h-11 rounded-sm bg-fg/10 flex items-center justify-center shrink-0 select-none">
-                                <span className="text-base font-bold font-mono text-fg">{initials}</span>
-                            </div>
                             <div className="min-w-0">
                                 <p className="text-sm font-semibold text-fg truncate leading-snug">
-                                    {professor?.full_name || professor?.username}
+                                    {tName(professor?.full_name, language) || professor?.username}
                                 </p>
                                 <p className="text-[11px] text-secondary truncate">
-                                    @{professor?.username}{professor?.course_name ? ` · ${professor.course_name}` : ''}
+                                    <span dir="ltr">@{professor?.username}</span>{professor?.course_name ? ` · ${tName(professor.course_name, language)}` : ''}
                                 </p>
                             </div>
                         </div>
@@ -522,15 +521,17 @@ export function SettingsTab({
                                             />
                                         </Field>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleProfileSave}
-                                        disabled={profileSaving}
-                                        className="btn-primary text-xs px-4 py-2 w-full sm:w-auto sm:self-end"
-                                    >
-                                        {profileSaving && <Loader2 size={12} className="animate-spin" />}
-                                        {profileSaving ? t('settings_saving') : t('settings_update_password')}
-                                    </button>
+                                    <div className="flex sm:justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={handleProfileSave}
+                                            disabled={profileSaving}
+                                            className="btn-primary text-xs px-4 py-2 w-full sm:w-auto"
+                                        >
+                                            {profileSaving && <Loader2 size={12} className="animate-spin" />}
+                                            {profileSaving ? t('settings_saving') : t('settings_update_password')}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -559,7 +560,7 @@ export function SettingsTab({
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-medium text-fg truncate">{pk.device_name}</p>
-                                                    <p className="text-[11px] text-secondary">{t('settings_passkey_added')} {new Date(pk.created_at).toLocaleDateString()}</p>
+                                                    <p className="text-[11px] text-secondary">{t('settings_passkey_added')} {formatDate(new Date(pk.created_at), language, true)}</p>
                                                 </div>
                                             </div>
                                             <button
@@ -670,7 +671,7 @@ export function SettingsTab({
                                     {t('settings_email_pref_desc')}
                                 </p>
                             </div>
-                            <Toggle checked={sendEmailsOnFinalize} onChange={onToggleSendEmails} />
+                            <Toggle checked={sendEmailsOnFinalize} onChange={onToggleSendEmails} rtl={language === 'ckb'} />
                         </div>
                     </div>
                 </section>
@@ -694,7 +695,7 @@ export function SettingsTab({
                                 type="button"
                                 onClick={handleExport}
                                 disabled={exporting}
-                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 w-[136px]"
                             >
                                 {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
                                 {exporting ? t('settings_btn_exporting') : t('settings_btn_export')}
@@ -734,7 +735,7 @@ export function SettingsTab({
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={importing}
-                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 w-[136px]"
                             >
                                 {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                                 {importing ? t('settings_btn_importing') : t('settings_btn_import')}
@@ -745,19 +746,22 @@ export function SettingsTab({
 
                 {/* ══ DANGER ZONE ══════════════════════════════════════ */}
                 <section>
-                    <SectionHeader title={t('settings_danger_title')} description={t('settings_danger_desc')} />
-                    <div className="border border-red-500/25 rounded-sm overflow-hidden">
+                    <div className="mb-3">
+                        <h3 className="text-sm font-semibold text-red-500">{t('settings_danger_title')}</h3>
+                        <p className="text-xs text-red-400/70 mt-0.5">{t('settings_danger_desc')}</p>
+                    </div>
+                    <div className="border border-red-500/40 rounded-sm overflow-hidden bg-red-500/5">
                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 sm:px-5 py-4 sm:py-5">
                             <div>
-                                <p className="text-sm font-medium text-fg">{t('settings_reset')}</p>
-                                <p className="text-xs text-secondary mt-1 leading-relaxed">
+                                <p className="text-sm font-medium text-red-400">{t('settings_reset')}</p>
+                                <p className="text-xs text-red-400/60 mt-1 leading-relaxed">
                                     {t('settings_reset_desc')}
                                 </p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setShowConfirm(true)}
-                                className="flex items-center justify-center gap-1.5 px-3 py-2 border border-red-500/30 text-red-500 text-xs font-medium rounded-sm hover:bg-red-500/10 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 border border-red-500/50 text-red-500 text-xs font-medium rounded-sm hover:bg-red-500/20 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                             >
                                 <RotateCcw size={12} />
                                 {t('settings_btn_reset')}

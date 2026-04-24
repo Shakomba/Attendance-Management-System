@@ -69,7 +69,7 @@ services:
       RECOGNITION_EVENT_COOLDOWN_SEC: ${RECOGNITION_EVENT_COOLDOWN_SEC:-20}
       ENROLLMENT_POSE_DISTANCE_THRESHOLD: "0.06"
 
-      ANTISPOOF_ENABLED: "true"
+      ANTISPOOF_ENABLED: "${ANTISPOOF_ENABLED:-true}"
       ANTISPOOF_LIVE_THRESHOLD: ${ANTISPOOF_LIVE_THRESHOLD:-0.55}
       ANTISPOOF_WINDOW_FRAMES: ${ANTISPOOF_WINDOW_FRAMES:-6}
       ANTISPOOF_REQUIRED_LIVE_FRAMES: ${ANTISPOOF_REQUIRED_LIVE_FRAMES:-4}
@@ -86,6 +86,10 @@ services:
       SMTP_FROM: ${SMTP_FROM:-Attendify <no-reply@attendify.tech>}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       SMTP_DRY_RUN: ${SMTP_DRY_RUN:-false}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_API_URL: ${RESEND_API_URL:-https://api.resend.com/emails}
+      RESEND_TIMEOUT_SEC: ${RESEND_TIMEOUT_SEC:-15}
     volumes:
       - insightface_models:/root/.insightface
     healthcheck:

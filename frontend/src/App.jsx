@@ -151,6 +151,8 @@ export default function App() {
     setEnrollmentTarget({ studentId, fullName });
   }, []);
 
+  const navigationLocked = Boolean(enrollmentTarget);
+
   const closeEnrollment = useCallback(() => {
     enrollment.stopEnrollment();
     enrollment.setComplete(false);
@@ -283,6 +285,7 @@ export default function App() {
 
     const payload = overlayRef.current;
     if (!payload?.faces?.length || !cameraActiveRef.current) return;
+    const isRtl = language === "ckb";
 
     const sourceW = payload.frameWidth || renderRef.current.lastImageWidth;
     const sourceH = payload.frameHeight || renderRef.current.lastImageHeight;
@@ -362,7 +365,8 @@ export default function App() {
       const padX = 8;
       const tagW = textWidth + padX * 2;
       const tagH = 24;
-      const tagX = Math.min(Math.max(left, 2), Math.max(2, cssW - tagW - 2));
+      const preferredX = isRtl ? (right - tagW) : left;
+      const tagX = Math.min(Math.max(preferredX, 2), Math.max(2, cssW - tagW - 2));
       const tagY = Math.max(2, top - tagH - 4);
 
       ctx.fillStyle = strokeColor;
@@ -371,9 +375,13 @@ export default function App() {
       ctx.fill();
 
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, tagX + padX, tagY + 16);
+      // Keep camera labels visually aligned in both LTR and RTL languages.
+      ctx.textAlign = isRtl ? "right" : "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(label, isRtl ? (tagX + tagW - padX) : (tagX + padX), tagY + 16);
+      ctx.textAlign = "left";
     }
-  }, [syncCanvas, overlayRef, cameraActiveRef]);
+  }, [syncCanvas, overlayRef, cameraActiveRef, language, t]);
 
   const drawFrame = useCallback(
     (img) => {
@@ -397,7 +405,11 @@ export default function App() {
       ctx.fillRect(0, 0, cssW, cssH);
 
       const fit = coverRect(sourceW, sourceH, cssW, cssH);
+      ctx.save();
+      ctx.translate(cssW, 0);
+      ctx.scale(-1, 1);
       ctx.drawImage(img, fit.x, fit.y, fit.w, fit.h);
+      ctx.restore();
       drawOverlay();
     },
     [drawOverlay, syncCanvas],
@@ -604,6 +616,7 @@ export default function App() {
       setActiveTab={setActiveTab}
       professor={professor}
       onLogout={handleLogout}
+      navigationLocked={navigationLocked}
       headerAction={
         <button
           className={`h-8 px-3 sm:px-4 rounded-sm font-medium text-[11px] sm:text-xs transition-all duration-300 ease-in-out cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${sessionId
@@ -611,7 +624,7 @@ export default function App() {
             : "bg-fg text-bg hover:opacity-80"
             }`}
           onClick={sessionId ? handleFinalizeSession : handleStartSession}
-          disabled={sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
+          disabled={navigationLocked || sessionBusy.starting || sessionBusy.finalizing || (!sessionId && !courseId)}
         >
           {sessionBusy.starting ? t("session_starting") : sessionBusy.finalizing ? t("session_ending") : sessionId ? t("session_end") : t("session_start")}
         </button>
@@ -746,7 +759,6 @@ export default function App() {
           complete={enrollment.complete}
           rejected={enrollment.rejected}
           onStart={handleStartEnrollment}
-          onStop={enrollment.stopEnrollment}
           onClose={closeEnrollment}
           videoRef={enrollment.videoRef}
           canvasRef={enrollment.canvasRef}

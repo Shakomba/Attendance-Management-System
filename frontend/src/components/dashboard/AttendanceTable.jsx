@@ -1,9 +1,11 @@
 import { Check, X, HelpCircle, Loader2, Clock } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from '../../lib/i18n'
+import { formatDate, formatTime } from '../../lib/dateFormatter';
+import { tName } from '../../lib/nameTranslation';
 
 export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessionEndTime, markManualAttendance, attendanceBusyByStudent }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const sessionEnded = !sessionId && !!sessionEndTime
 
   const [elapsed, setElapsed] = useState(0)
@@ -44,12 +46,12 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
       <div className="px-6 py-4 border-b border-border bg-surface">
         <div className="flex items-center gap-2 text-xs font-mono text-secondary">
           {sessionStartTime && (
-            <span>{t('history_started')} <span className="text-primary">{sessionStartTime.toLocaleTimeString()}</span> {!sessionEnded && `(${formatElapsed(elapsed)})`}</span>
+            <span>{t('history_started')} <span className="text-primary">{formatTime(sessionStartTime, language, true)}</span> {!sessionEnded && `(${formatElapsed(elapsed)})`}</span>
           )}
           {sessionEnded && sessionEndTime && (
             <>
               <span className="opacity-40">·</span>
-              <span>{t('history_ended')} <span className="text-primary">{sessionEndTime.toLocaleTimeString()}</span></span>
+              <span>{t('history_ended')} <span className="text-primary">{formatTime(sessionEndTime, language, true)}</span></span>
             </>
           )}
         </div>
@@ -83,7 +85,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                       <div className="flex items-center gap-3">
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-primary">{row.FullName}</span>
+                            <span className="font-semibold text-primary">{tName(row.FullName, language)}</span>
                           </div>
                           {/* Mobile-only: show status + time beneath name */}
                           <div className="flex items-center gap-2 mt-1 sm:hidden">
@@ -104,7 +106,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                               <>
                                 <span className="text-secondary/40">·</span>
                                 <span className="text-[11px] font-mono text-secondary">
-                                  {new Date(row.FirstSeenAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                  {formatTime(new Date(row.FirstSeenAt), language)}
                                 </span>
                               </>
                             )}
@@ -130,7 +132,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                     </td>
 
                     <td className="px-3 py-3 sm:px-6 sm:py-4 text-xs font-mono text-secondary hidden sm:table-cell">
-                      {present && row.FirstSeenAt ? new Date(row.FirstSeenAt).toLocaleTimeString() : '-'}
+                      {present && row.FirstSeenAt ? formatTime(new Date(row.FirstSeenAt), language, true) : '-'}
                     </td>
 
                     {!sessionEnded && (
@@ -141,7 +143,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                           <div className="flex justify-end gap-2">
                             <button
                               disabled={!!present}
-                              onClick={() => markManualAttendance(row.StudentID, row.FullName, "present")}
+                              onClick={() => markManualAttendance(row.StudentID, tName(row.FullName, language), "present")}
                               className="p-2.5 sm:p-1.5 rounded-sm border border-border text-secondary hover:bg-fg hover:text-bg hover:border-fg disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer"
                               title={t('action_mark_present')}
                             >
@@ -149,7 +151,7 @@ export function AttendanceTable({ attendance, sessionId, sessionStartTime, sessi
                             </button>
                             <button
                               disabled={!present}
-                              onClick={() => markManualAttendance(row.StudentID, row.FullName, "absent")}
+                              onClick={() => markManualAttendance(row.StudentID, tName(row.FullName, language), "absent")}
                               className="p-2.5 sm:p-1.5 rounded-sm border border-border text-secondary hover:bg-surface hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
                               title={t('action_mark_absent')}
                             >

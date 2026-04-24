@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { History, ChevronRight, ChevronDown, UserX, Users, Check, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
+import { formatDate, formatTime, formatDuration } from '../../lib/dateFormatter';
 
 function StatusBadge({ status }) {
   const { t } = useTranslation()
@@ -34,6 +35,7 @@ function StatusBadge({ status }) {
 }
 
 function SessionRow({ session, activeSessionId }) {
+  const { t, language } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   const startDate = session.started_at ? new Date(session.started_at) : null
@@ -44,8 +46,8 @@ function SessionRow({ session, activeSessionId }) {
       ? 'active'
       : 'incomplete'
 
-  const durationMin = startDate && endDate
-    ? Math.round((endDate - startDate) / 60000)
+  const durationStr = startDate && endDate
+    ? formatDuration(endDate - startDate, language)
     : null
 
   const absentPct = session.total_enrolled > 0
@@ -61,11 +63,11 @@ function SessionRow({ session, activeSessionId }) {
         {/* Date / Time */}
         <td className="px-3 sm:px-6 py-3 sm:py-4">
           <div className="font-medium text-primary text-sm">
-            {startDate ? startDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}
+            {startDate ? formatDate(startDate, language) : '—'}
           </div>
           <div className="text-xs font-mono text-secondary mt-0.5">
-            {startDate ? startDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
-            {durationMin !== null && <span className="ms-1 opacity-60">· {durationMin}m</span>}
+            {startDate ? formatTime(startDate, language) : ''}
+            {durationStr !== null && <span className="ms-1 opacity-60">· {durationStr}</span>}
           </div>
           {/* Mobile-only: show status inline */}
           <div className="sm:hidden mt-1">
@@ -201,10 +203,10 @@ export function SessionHistory({ apiFetch, courseId, activeSessionId }) {
           <table className="w-full text-start text-sm whitespace-nowrap">
             <thead className="sticky top-0 bg-bg border-b border-border text-secondary text-xs uppercase z-10 hidden sm:table-header-group">
               <tr>
-                <th className="px-6 py-3 font-medium">{t('history_started')}</th>
-                <th className="px-6 py-3 font-medium hidden sm:table-cell">{t('table_status')}</th>
-                <th className="px-6 py-3 font-medium">{t('history_attendance')}</th>
-                <th className="px-6 py-3 font-medium text-end">
+                <th className="px-3 sm:px-6 py-3 font-medium text-start">{t('history_started')}</th>
+                <th className="px-6 py-3 font-medium text-start hidden sm:table-cell">{t('table_status')}</th>
+                <th className="px-3 sm:px-6 py-3 font-medium text-start">{t('history_attendance')}</th>
+                <th className="px-3 sm:px-6 py-3 font-medium text-end">
                   <span className="flex items-center justify-end gap-1">
                     <Users size={12} /> {sessions[0]?.total_enrolled ?? 0} {t('stat_enrolled')}
                   </span>

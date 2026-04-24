@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import smtplib
+import json
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Tuple
@@ -170,25 +172,25 @@ class EmailService:
         desc_template = td["desc_late"] if is_late else td["desc_absent"]
         session_desc = desc_template.format(course=course_name, hrs=session_hours)
 
-        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{{cls._STYLE_BODY}}">
-<div style="{{cls._STYLE_CARD}}">
-  <div style="{{cls._STYLE_HEADER}}">
-    <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{{td["attend_notice"]}} — {{status_label}}</h2>
-    <p style="margin:0; font-size:13px; color:#6b7280;">{{course_name}}</p>
+        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{cls._STYLE_BODY}">
+<div style="{cls._STYLE_CARD}">
+    <div style="{cls._STYLE_HEADER}">
+        <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{td["attend_notice"]} — {status_label}</h2>
+        <p style="margin:0; font-size:13px; color:#6b7280;">{course_name}</p>
   </div>
-  <div style="{{cls._STYLE_SECTION}}">
-    <p style="margin:0 0 16px; font-size:14px;">{{td["dear"]}} <strong>{{name}}</strong>,</p>
-    <p style="margin:0 0 16px; font-size:14px; color:#374151;">{{session_desc}}</p>
-    {{banner}}
-    <table style="{{cls._STYLE_TABLE}}">
-      <tr><th style="{{cls._STYLE_TH}}">{{td["detail"]}}</th><th style="{{cls._STYLE_TH}}">{{td["value"]}}</th></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["status_session"]}}</td><td style="{{cls._STYLE_TD}}; font-weight:700; color:#b45309;">{{status_label}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["hrs_session"]}}</td><td style="{{cls._STYLE_TD}}; font-weight:700; color:#ef4444;">{{session_hours:.1f}} {{td["hr_s"]}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["deducted_session"]}}</td><td style="{{cls._STYLE_TD}}; color:#ef4444;">−{{session_penalty:.2f}} {{td["pts"]}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD_BOLD}}">{{td["total_hrs"]}}</td><td style="{{cls._STYLE_TD_BOLD}}">{{total_hours:.1f}} {{td["hr_s"]}}</td></tr>
+    <div style="{cls._STYLE_SECTION}">
+        <p style="margin:0 0 16px; font-size:14px;">{td["dear"]} <strong>{name}</strong>,</p>
+        <p style="margin:0 0 16px; font-size:14px; color:#374151;">{session_desc}</p>
+        {banner}
+        <table style="{cls._STYLE_TABLE}">
+            <tr><th style="{cls._STYLE_TH}">{td["detail"]}</th><th style="{cls._STYLE_TH}">{td["value"]}</th></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["status_session"]}</td><td style="{cls._STYLE_TD}; font-weight:700; color:#b45309;">{status_label}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["hrs_session"]}</td><td style="{cls._STYLE_TD}; font-weight:700; color:#ef4444;">{session_hours:.1f} {td["hr_s"]}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["deducted_session"]}</td><td style="{cls._STYLE_TD}; color:#ef4444;">−{session_penalty:.2f} {td["pts"]}</td></tr>
+            <tr><td style="{cls._STYLE_TD_BOLD}">{td["total_hrs"]}</td><td style="{cls._STYLE_TD_BOLD}">{total_hours:.1f} {td["hr_s"]}</td></tr>
     </table>
-    <p style="margin:16px 0 4px; font-size:13px; color:#6b7280;">{{td["penalty_rule"]}}</p>
-    <p style="margin:0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
+        <p style="margin:16px 0 4px; font-size:13px; color:#6b7280;">{td["penalty_rule"]}</p>
+        <p style="margin:0; font-size:13px; color:#6b7280;">{td["contact"]}</p>
   </div>
 </div>
 </body></html>'''
@@ -222,29 +224,29 @@ class EmailService:
 
         hours_style = f"{cls._STYLE_TD}; font-weight:700;" + (" color:#ef4444;" if hours > 0 else "")
         penalty_style = f"{cls._STYLE_TD};" + (" color:#ef4444;" if penalty > 0 else "")
-        penalty_text = f"−{penalty:.2f} {{td['pts']}}" if penalty > 0 else f"{penalty:.2f} {{td['pts']}}"
+        penalty_text = f"−{penalty:.2f} {td['pts']}" if penalty > 0 else f"{penalty:.2f} {td['pts']}"
 
-        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{{cls._STYLE_BODY}}">
-<div style="{{cls._STYLE_CARD}}">
-  <div style="{{cls._STYLE_HEADER}}">
-    <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{{td["grade_report"]}}</h2>
-    <p style="margin:0; font-size:13px; color:#6b7280;">{{student['CourseName']}}</p>
+        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{cls._STYLE_BODY}">
+<div style="{cls._STYLE_CARD}">
+    <div style="{cls._STYLE_HEADER}">
+        <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{td["grade_report"]}</h2>
+        <p style="margin:0; font-size:13px; color:#6b7280;">{student['CourseName']}</p>
   </div>
-  <div style="{{cls._STYLE_SECTION}}">
-    <p style="margin:0 0 16px; font-size:14px;">{{td["dear"]}} <strong>{{student['FullName']}}</strong>,</p>
-    {{banner}}
-    <table style="{{cls._STYLE_TABLE}}">
-      <tr><th style="{{cls._STYLE_TH}}">{{td["component"]}}</th><th style="{{cls._STYLE_TH}}">{{td["grade"]}}</th></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["quiz1"]}}</td><td style="{{q1_style}}">{{student['Quiz1']}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["quiz2"]}}</td><td style="{{q2_style}}">{{student['Quiz2']}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["project"]}}</td><td style="{{proj_style}}">{{student['ProjectGrade']}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["assignment"]}}</td><td style="{{assn_style}}">{{student['AssignmentGrade']}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["midterm"]}}</td><td style="{{mid_style}}">{{student['MidtermGrade']}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["total_absence_hours"]}}</td><td style="{{hours_style}}">{{hours:.1f}} {{td["hr_s"]}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["attendance_penalty"]}}</td><td style="{{penalty_style}}">{{penalty_text}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD_BOLD}}">{{td["total_50"]}}</td><td style="{{adj_style}}">{{adjusted}} / 50</td></tr>
+    <div style="{cls._STYLE_SECTION}">
+        <p style="margin:0 0 16px; font-size:14px;">{td["dear"]} <strong>{student['FullName']}</strong>,</p>
+        {banner}
+        <table style="{cls._STYLE_TABLE}">
+            <tr><th style="{cls._STYLE_TH}">{td["component"]}</th><th style="{cls._STYLE_TH}">{td["grade"]}</th></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["quiz1"]}</td><td style="{q1_style}">{student['Quiz1']}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["quiz2"]}</td><td style="{q2_style}">{student['Quiz2']}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["project"]}</td><td style="{proj_style}">{student['ProjectGrade']}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["assignment"]}</td><td style="{assn_style}">{student['AssignmentGrade']}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["midterm"]}</td><td style="{mid_style}">{student['MidtermGrade']}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["total_absence_hours"]}</td><td style="{hours_style}">{hours:.1f} {td["hr_s"]}</td></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["attendance_penalty"]}</td><td style="{penalty_style}">{penalty_text}</td></tr>
+            <tr><td style="{cls._STYLE_TD_BOLD}">{td["total_50"]}</td><td style="{adj_style}">{adjusted} / 50</td></tr>
     </table>
-    <p style="margin:16px 0 0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
+        <p style="margin:16px 0 0; font-size:13px; color:#6b7280;">{td["contact"]}</p>
   </div>
 </div>
 </body></html>'''
@@ -265,29 +267,29 @@ class EmailService:
 
         hours_style = f"{cls._STYLE_TD}; font-weight:700;" + (" color:#ef4444;" if hours > 0 else "")
         penalty_style = f"{cls._STYLE_TD_BOLD};" + (" color:#ef4444;" if penalty > 0 else "")
-        penalty_text = f"−{penalty:.2f} {{td['pts']}}" if penalty > 0 else f"{penalty:.2f} {{td['pts']}}"
+        penalty_text = f"−{penalty:.2f} {td['pts']}" if penalty > 0 else f"{penalty:.2f} {td['pts']}"
         
         summary = td["absence_summary"].format(course=course_name)
 
-        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{{cls._STYLE_BODY}}">
-<div style="{{cls._STYLE_CARD}}">
-  <div style="{{cls._STYLE_HEADER}}">
-    <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{{td["absence_report"]}}</h2>
-    <p style="margin:0; font-size:13px; color:#6b7280;">{{course_name}}</p>
+        return f'''<html {direction}><head><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet"></head><body style="{cls._STYLE_BODY}">
+<div style="{cls._STYLE_CARD}">
+    <div style="{cls._STYLE_HEADER}">
+        <h2 style="margin:0 0 4px; font-size:18px; color:#111827;">{td["absence_report"]}</h2>
+        <p style="margin:0; font-size:13px; color:#6b7280;">{course_name}</p>
   </div>
-  <div style="{{cls._STYLE_SECTION}}">
-    <p style="margin:0 0 16px; font-size:14px;">{{td["dear"]}} <strong>{{name}}</strong>,</p>
+    <div style="{cls._STYLE_SECTION}">
+        <p style="margin:0 0 16px; font-size:14px;">{td["dear"]} <strong>{name}</strong>,</p>
     <p style="margin:0 0 16px; font-size:14px; color:#374151;">
-      {{summary}}
+            {summary}
     </p>
-    {{banner}}
-    <table style="{{cls._STYLE_TABLE}}">
-      <tr><th style="{{cls._STYLE_TH}}">{{td["detail"]}}</th><th style="{{cls._STYLE_TH}}">{{td["value"]}}</th></tr>
-      <tr><td style="{{cls._STYLE_TD}}">{{td["total_absence_hours"]}}</td><td style="{{hours_style}}">{{hours:.1f}} {{td["hr_s"]}}</td></tr>
-      <tr><td style="{{cls._STYLE_TD_BOLD}}">{{td["total_deducted"]}}</td><td style="{{penalty_style}}">{{penalty_text}}</td></tr>
+        {banner}
+        <table style="{cls._STYLE_TABLE}">
+            <tr><th style="{cls._STYLE_TH}">{td["detail"]}</th><th style="{cls._STYLE_TH}">{td["value"]}</th></tr>
+            <tr><td style="{cls._STYLE_TD}">{td["total_absence_hours"]}</td><td style="{hours_style}">{hours:.1f} {td["hr_s"]}</td></tr>
+            <tr><td style="{cls._STYLE_TD_BOLD}">{td["total_deducted"]}</td><td style="{penalty_style}">{penalty_text}</td></tr>
     </table>
-    <p style="margin:16px 0 4px; font-size:13px; color:#6b7280;">{{td["penalty_rule"]}}</p>
-    <p style="margin:0; font-size:13px; color:#6b7280;">{{td["contact"]}}</p>
+        <p style="margin:16px 0 4px; font-size:13px; color:#6b7280;">{td["penalty_rule"]}</p>
+        <p style="margin:0; font-size:13px; color:#6b7280;">{td["contact"]}</p>
   </div>
 </div>
 </body></html>'''
@@ -296,6 +298,34 @@ class EmailService:
     # ── Send single email ────────────────────────────────────────────
 
     def _send_email(self, recipient_email: str, subject: str, html_body: str) -> None:
+        if settings.email_provider == "resend_api":
+            if not settings.resend_api_key:
+                raise RuntimeError("RESEND_API_KEY is required when EMAIL_PROVIDER=resend_api")
+
+            payload = {
+                "from": settings.smtp_from,
+                "to": [recipient_email],
+                "subject": subject,
+                "html": html_body,
+            }
+            body = json.dumps(payload).encode("utf-8")
+            try:
+                response = requests.post(
+                    settings.resend_api_url,
+                    data=body,
+                    headers={
+                        "Authorization": f"Bearer {settings.resend_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=settings.resend_timeout_sec,
+                )
+            except requests.RequestException as exc:
+                raise RuntimeError(f"Resend API network error: {exc}") from exc
+
+            if response.status_code not in (200, 201, 202):
+                raise RuntimeError(f"Resend API HTTP {response.status_code}: {response.text}")
+            return
+
         message = MIMEMultipart("alternative")
         message["Subject"] = subject
         message["From"] = settings.smtp_from

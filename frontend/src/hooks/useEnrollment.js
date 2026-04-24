@@ -142,7 +142,12 @@ export function useEnrollment(apiBase) {
 
                     canvas.width = 640
                     canvas.height = Math.round((video.videoHeight / video.videoWidth) * 640)
+                    ctx.save()
+                    ctx.clearRect(0, 0, canvas.width, canvas.height)
+                    ctx.translate(canvas.width, 0)
+                    ctx.scale(-1, 1)
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                    ctx.restore()
 
                     canvas.toBlob((blob) => {
                         if (!blob || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return

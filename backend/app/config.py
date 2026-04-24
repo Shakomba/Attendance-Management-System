@@ -64,6 +64,10 @@ class Settings:
     smtp_from: str = os.getenv("SMTP_FROM", "Attendance Bot <no-reply@example.com>")
     smtp_use_tls: bool = _as_bool(os.getenv("SMTP_USE_TLS", "true"), True)
     smtp_dry_run: bool = _as_bool(os.getenv("SMTP_DRY_RUN", "true"), True)
+    email_provider: str = os.getenv("EMAIL_PROVIDER", "smtp").strip().lower()
+    resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    resend_api_url: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
+    resend_timeout_sec: float = float(os.getenv("RESEND_TIMEOUT_SEC", "15"))
 
     # JWT — set JWT_SECRET_KEY in .env before deploying to production
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_USE_A_LONG_RANDOM_SECRET")

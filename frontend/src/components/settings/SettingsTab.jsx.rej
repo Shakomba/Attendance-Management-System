@@ -1,0 +1,46 @@
+diff a/frontend/src/components/settings/SettingsTab.jsx b/frontend/src/components/settings/SettingsTab.jsx	(rejected hunks)
+@@ -522,15 +521,17 @@ export function SettingsTab({
+                                             />
+                                         </Field>
+                                     </div>
+-                                    <button
+-                                        type="button"
+-                                        onClick={handleProfileSave}
+-                                        disabled={profileSaving}
+-                                        className="btn-primary text-xs px-4 py-2 w-full sm:w-auto sm:self-end"
+-                                    >
+-                                        {profileSaving && <Loader2 size={12} className="animate-spin" />}
+-                                        {profileSaving ? t('settings_saving') : t('settings_update_password')}
+-                                    </button>
++                                    <div className="flex sm:justify-end">
++                                        <button
++                                            type="button"
++                                            onClick={handleProfileSave}
++                                            disabled={profileSaving}
++                                            className="btn-primary text-xs px-4 py-2 w-full sm:w-auto"
++                                        >
++                                            {profileSaving && <Loader2 size={12} className="animate-spin" />}
++                                            {profileSaving ? t('settings_saving') : t('settings_update_password')}
++                                        </button>
++                                    </div>
+                                 </div>
+                             )}
+                         </div>
+@@ -694,7 +695,7 @@ export function SettingsTab({
+                                 type="button"
+                                 onClick={handleExport}
+                                 disabled={exporting}
+-                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
++                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 w-[136px]"
+                             >
+                                 {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                                 {exporting ? t('settings_btn_exporting') : t('settings_btn_export')}
+@@ -734,7 +735,7 @@ export function SettingsTab({
+                                 type="button"
+                                 onClick={() => fileInputRef.current?.click()}
+                                 disabled={importing}
+-                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
++                                className="btn-secondary text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 w-[136px]"
+                             >
+                                 {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                                 {importing ? t('settings_btn_importing') : t('settings_btn_import')}

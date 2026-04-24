@@ -12,6 +12,12 @@ const POSE_ICONS = {
 
 const POSE_LABELS = ['front', 'left', 'right', 'up', 'down']
 
+function mirroredPose(pose) {
+    if (pose === 'left') return 'right'
+    if (pose === 'right') return 'left'
+    return pose
+}
+
 export function EnrollmentModal({
     studentName,
     enrolling,
@@ -23,7 +29,6 @@ export function EnrollmentModal({
     complete,
     rejected,
     onStart,
-    onStop,
     onClose,
     videoRef,
     canvasRef,
@@ -56,8 +61,28 @@ export function EnrollmentModal({
                         mirror.width = cw
                         mirror.height = ch
                     }
-                    ctx.setTransform(-dpr, 0, 0, dpr, rect.width * dpr, 0)
-                    ctx.drawImage(video, 0, 0, rect.width, rect.height)
+                    const videoRatio = video.videoWidth / video.videoHeight
+                    const targetRatio = cw / ch
+
+                    let sx = 0
+                    let sy = 0
+                    let sw = video.videoWidth
+                    let sh = video.videoHeight
+
+                    if (videoRatio > targetRatio) {
+                        sw = Math.round(video.videoHeight * targetRatio)
+                        sx = Math.round((video.videoWidth - sw) / 2)
+                    } else {
+                        sh = Math.round(video.videoWidth / targetRatio)
+                        sy = Math.round((video.videoHeight - sh) / 2)
+                    }
+
+                    // Draw in real canvas pixels to avoid mobile sub-pixel distortion.
+                    ctx.setTransform(1, 0, 0, 1, 0, 0)
+                    ctx.clearRect(0, 0, cw, ch)
+                    ctx.translate(cw, 0)
+                    ctx.scale(-1, 1)
+                    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch)
                     ctx.setTransform(1, 0, 0, 1, 0, 0)
                 }
             }
@@ -67,7 +92,8 @@ export function EnrollmentModal({
         return () => cancelAnimationFrame(rafId)
     }, [enrolling, videoRef])
 
-    const poseCmd = currentPose ? (POSE_CMD[currentPose] || currentPose.toUpperCase()) : ''
+    const visualCurrentPose = mirroredPose(currentPose)
+    const poseCmd = visualCurrentPose ? (POSE_CMD[visualCurrentPose] || String(visualCurrentPose).toUpperCase()) : ''
 
     return (
         <>
@@ -95,10 +121,7 @@ export function EnrollmentModal({
                 .ams-active-ring { animation: ams-glow-pulse 1.6s ease-in-out infinite; }
             `}</style>
 
-            <div
-                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
-                onClick={onClose}
-            >
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4">
                 <div
                     className="ams-modal bg-bg border border-border w-full max-w-sm shadow-2xl"
                     onClick={e => e.stopPropagation()}
@@ -186,16 +209,16 @@ export function EnrollmentModal({
                                 <div />
                                 {/* Row 2 */}
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
-                                    <ArrowLeft size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_left')}</span>
+                                    <ArrowRight size={12} className="text-secondary" />
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_right')}</span>
                                 </div>
                                 <div className="border-2 border-fg flex flex-col items-center justify-center py-2 gap-1">
                                     <User size={14} className="text-fg" />
                                     <span className="text-[8px] font-mono text-fg uppercase">{t('pose_front')}</span>
                                 </div>
                                 <div className="border border-border flex flex-col items-center justify-center py-2 gap-1 opacity-50">
-                                    <ArrowRight size={12} className="text-secondary" />
-                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_right')}</span>
+                                    <ArrowLeft size={12} className="text-secondary" />
+                                    <span className="text-[8px] font-mono text-secondary uppercase">{t('pose_left')}</span>
                                 </div>
                                 {/* Row 3 */}
                                 <div />
@@ -273,9 +296,10 @@ export function EnrollmentModal({
                             <div className="px-5 py-4 border-t border-border">
                                 <div className="flex items-start justify-between gap-1">
                                     {POSE_LABELS.map((pose, i) => {
+                                        const visualPose = mirroredPose(pose)
                                         const captured = i < progress
-                                        const active = pose === currentPose
-                                        const Icon = POSE_ICONS[pose] || User
+                                        const active = visualPose === visualCurrentPose
+                                        const Icon = POSE_ICONS[visualPose] || User
                                         return (
                                             <div key={pose} className="flex-1 flex flex-col items-center gap-1.5">
                                                 <div className={`w-9 h-9 border flex items-center justify-center transition-all duration-300 ${
@@ -289,7 +313,7 @@ export function EnrollmentModal({
                                                 </div>
                                                 <span className={`text-[9px] font-mono uppercase tracking-wide ${
                                                     captured ? 'text-green-500' : active ? 'text-fg' : 'text-secondary/30'
-                                                }`}>{t(`pose_${pose}`)}</span>
+                                                }`}>{t(`pose_${visualPose}`)}</span>
                                             </div>
                                         )
                                     })}
@@ -303,14 +327,6 @@ export function EnrollmentModal({
                                     />
                                 </div>
 
-                                <div className="mt-3 flex justify-center">
-                                    <button
-                                        onClick={onStop}
-                                        className="text-[10px] font-mono uppercase tracking-widest text-secondary hover:text-red-400 transition-colors cursor-pointer"
-                                    >
-                                        {t('enroll_abort')}
-                                    </button>
-                                </div>
                             </div>
                         </>
                     )}

@@ -1,0 +1,23 @@
+diff a/backend/app/services/enrollment_service.py b/backend/app/services/enrollment_service.py	(rejected hunks)
+@@ -186,21 +186,6 @@ class EnrollmentService:
+                 "total_poses": len(POSES),
+             }
+ 
+-        # Run CNN-based PAD on the raw frame + bbox so the model sees the
+-        # wider context (screen bezels, hand holding phone, etc.).
+-        spoof_result = self.spoof_detector.analyze(
+-            frame_bgr, (target.left, target.top, target.right, target.bottom),
+-        )
+-        if not spoof_result.is_live:
+-            state.pose_consecutive_valid = 0  # reset hold counter
+-            return {
+-                "type": "spoof_detected",
+-                "pose": current_pose,
+-                "reason": f"Flat image detected ({spoof_result.reason}). Please use your real face.",
+-                "progress": state.progress,
+-                "total_poses": len(POSES),
+-            }
+-
+         embedding = target.embedding
+ 
+         # Accumulate hold counter — diversity is checked only after the hold is satisfied

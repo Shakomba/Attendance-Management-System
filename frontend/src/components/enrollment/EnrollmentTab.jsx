@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ScanFace, CheckCircle2, Clock, Loader2, RefreshCw, Search } from 'lucide-react'
+import { ScanFace, CheckCircle2, Loader2, RefreshCw, Search } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
+import { tName } from '../../lib/nameTranslation';
 
 export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -33,7 +34,7 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
 
   const filtered = search.trim()
     ? students.filter(s =>
-        s.FullName.toLowerCase().includes(search.toLowerCase()) ||
+        tName(s.FullName, language).toLowerCase().includes(search.toLowerCase()) ||
         s.StudentCode.toLowerCase().includes(search.toLowerCase())
       )
     : students
@@ -111,32 +112,25 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                       {enrolled ? <CheckCircle2 size={16} /> : <ScanFace size={16} />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-fg truncate">{student.FullName}</p>
-                      {/* Mobile-only status text under name */}
-                      <p className={`text-[10px] font-medium mt-0.5 sm:hidden ${enrolled ? 'text-green-500' : 'text-secondary'}`}>
-                        {enrolled ? t('enroll_completed') : t('enroll_pending')}
-                      </p>
+                      <p className="text-sm font-semibold text-fg truncate">{tName(student.FullName, language)}</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                    {/* Status badge — desktop only */}
-                    <span className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-medium border ${
-                      enrolled
-                        ? 'border-green-500/30 bg-green-500/10 text-green-500'
-                        : 'border-border bg-surface text-secondary'
-                    }`}>
-                      {enrolled ? <><CheckCircle2 size={11} /> {t('enroll_completed')}</> : <><Clock size={11} /> {t('enroll_pending')}</>}
-                    </span>
                     <button
-                      onClick={() => onEnrollStudent(student.StudentID, student.FullName)}
-                      className={`px-3 sm:px-4 py-1.5 rounded-sm text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+                      onClick={() => onEnrollStudent(student.StudentID, tName(student.FullName, language))}
+                      className={`relative min-w-[108px] px-3 sm:px-4 py-1.5 rounded-sm text-xs font-medium transition-all cursor-pointer whitespace-nowrap text-center ${
                         enrolled
-                          ? 'border border-border text-secondary hover:text-fg hover:bg-surface'
+                          ? 'group border border-green-500/40 text-green-500 hover:bg-fg hover:border-fg'
                           : 'bg-fg text-bg hover:opacity-80'
                       }`}
                     >
-                      {enrolled ? t('enroll_reenroll') : t('enroll_add')}
+                      {enrolled ? (
+                        <>
+                          <span className="transition-opacity duration-150 group-hover:opacity-0">{t('enroll_enrolled')}</span>
+                          <span className="absolute inset-0 flex items-center justify-center text-bg opacity-0 transition-opacity duration-150 group-hover:opacity-100">{t('enroll_reenroll')}</span>
+                        </>
+                      ) : t('enroll_add')}
                     </button>
                   </div>
                 </div>

@@ -1,6 +1,7 @@
 import { Edit2, ShieldAlert, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from '../../lib/i18n'
+import { tName } from '../../lib/nameTranslation';
 
 /* ── Shared helpers ──────────────────────────────────────────────── */
 const preFinalColumns = [
@@ -33,7 +34,7 @@ function computeRow(row) {
 
 /* ── Mobile card for a single student ────────────────────────────── */
 function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit, cancelGradeEdit, updateGradeDraftField, saveGradeEdit }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const { isDropped, isAtRisk, preFinal50, total100 } = computeRow(row);
   const [expanded, setExpanded] = useState(false);
 
@@ -59,7 +60,7 @@ function MobileGradeCard({ row, isEditing, isSaving, gradeEditor, startGradeEdit
         onClick={() => !isEditing && setExpanded(e => !e)}
       >
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-primary text-sm truncate">{row.FullName}</div>
+          <div className="font-semibold text-primary text-sm truncate">{tName(row.FullName, language)}</div>
           <div className="mt-1">
             <span className={`text-lg font-bold font-mono ${Number(total100) < 50 ? 'text-red-500' : 'text-primary'}`}>
               {total100}
@@ -151,7 +152,7 @@ export function GradebookTable({
   updateGradeDraftField,
   saveGradeEdit,
 }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const [search, setSearch] = useState('')
 
   if (!gradebook?.length) {
@@ -164,7 +165,7 @@ export function GradebookTable({
   }
 
   const filtered = search.trim()
-    ? gradebook.filter(row => row.FullName?.toLowerCase().includes(search.trim().toLowerCase()))
+    ? gradebook.filter(row => tName(row.FullName, language)?.toLowerCase().includes(search.trim().toLowerCase()))
     : gradebook
 
   return (
@@ -252,7 +253,7 @@ export function GradebookTable({
                 return (
                   <tr key={row.StudentID} className={`transition-colors ${rowBg}`}>
                     <td className="px-6 py-3 sticky start-0 z-10 border-e border-border font-medium" style={stickyStyle}>
-                      <div className="text-primary">{row.FullName}</div>
+                      <div className="text-primary">{tName(row.FullName, language)}</div>
                     </td>
 
                     {preFinalColumns.map((c) => {

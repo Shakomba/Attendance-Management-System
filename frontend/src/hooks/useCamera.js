@@ -158,7 +158,12 @@ export function useCamera(toWsBase, apiBase) {
                 const height = Math.max(240, Math.round((video.videoHeight / video.videoWidth) * width))
                 captureCanvas.width = width
                 captureCanvas.height = height
+                captureCtx.save()
+                captureCtx.clearRect(0, 0, width, height)
+                captureCtx.translate(width, 0)
+                captureCtx.scale(-1, 1)
                 captureCtx.drawImage(video, 0, 0, width, height)
+                captureCtx.restore()
 
                 sendBusyRef.current = true
                 captureCanvas.toBlob((blob) => {

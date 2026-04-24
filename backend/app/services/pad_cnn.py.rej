@@ -1,0 +1,136 @@
+diff a/backend/app/services/pad_cnn.py b/backend/app/services/pad_cnn.py	(rejected hunks)
+@@ -5,13 +5,18 @@ Two complementary scales run as an ensemble:
+   - 2.7_80x80_MiniFASNetV2  — wider crop, captures screen bezels / hand / background
+   - 4.0_0_0_80x80_MiniFASNetV1SE  — even wider, stronger against phone-screen replay
+ 
+-Each model outputs a 3-class score [fake_print, live, fake_3d_mask].  We softmax,
+-take the live probability, then average across the two models.  A frame is
+-classified live when the averaged live probability >= live_threshold.
++Each model outputs 3-class logits [class0, live, class2].  We softmax and take
++index 1 (live) then average across both models.
++
++Critical preprocessing (confirmed from MiniVision source data_io/functional.py):
++  - Input range: raw float32 0..255 — NOT normalised to 0..1.
++    MiniVision's custom to_tensor() calls img.float() only (no /255).
++  - Crop: use CropImage._get_new_box logic — SHIFT window into frame bounds,
++    do NOT zero-pad.  The model was trained on real image context.
++  - bbox format fed into _crop_for_scale: (left, top, right, bottom).
+ 
+ Model files are loaded from `backend/app/models/pad/` at startup.  If they are
+-missing the detector reports available=False and the caller should fall back
+-gracefully.  See scripts/convert_pad_models.py for the one-time setup.
++missing the detector reports available=False.  See scripts/convert_pad_models.py.
+ """
+ 
+ from __future__ import annotations
+@@ -30,8 +35,6 @@ _log = logging.getLogger("pad_cnn")
+ _MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "pad"
+ 
+ # (filename, crop_scale, input_size)
+-# Crop scale is the multiplier applied to max(face_w, face_h) to build a square
+-# context window around the face; MiniVision trained with these exact scales.
+ _MODEL_FILES: List[Tuple[str, float, int]] = [
+     ("2.7_80x80_MiniFASNetV2.onnx", 2.7, 80),
+     ("4_0_0_80x80_MiniFASNetV1SE.onnx", 4.0, 80),
+@@ -112,45 +115,52 @@ class CnnPadDetector:
+         scale: float,
+         out_size: int,
+     ) -> np.ndarray:
+-        """Replicate Silent-Face-Anti-Spoofing's CropImage behaviour.
++        """Exact port of MiniVision's CropImage._get_new_box + crop.
++
++        bbox is (left, top, right, bottom) from the face detector.
++        Internally converts to (x, y, w, h) as MiniVision expects.
+ 
+-        Builds a square crop centered on the face, sized by
+-        max(face_w, face_h) * scale.  Regions that fall outside the frame are
+-        padded with zeros — this mimics the screen/bezel context the model was
+-        trained to expect.
++        Key differences from naive approaches:
++        - Shifts the crop window to stay inside the frame instead of zero-padding.
++          The model was trained on real image context, not black borders.
++        - Scales w and h independently (non-square source crop), then resizes.
++        - Clamps scale so the window never exceeds the frame.
+         """
+         left, top, right, bottom = bbox
+-        face_w = max(1, right - left)
+-        face_h = max(1, bottom - top)
+-        cx = (left + right) // 2
+-        cy = (top + bottom) // 2
+-
+-        side = int(max(face_w, face_h) * scale)
+-        side = max(side, 8)
+-
+-        x1 = cx - side // 2
+-        y1 = cy - side // 2
+-        x2 = x1 + side
+-        y2 = y1 + side
+-
+-        frame_h, frame_w = frame_bgr.shape[:2]
+-        pad_l = max(0, -x1)
+-        pad_t = max(0, -y1)
+-        pad_r = max(0, x2 - frame_w)
+-        pad_b = max(0, y2 - frame_h)
+-
+-        x1c = max(0, x1)
+-        y1c = max(0, y1)
+-        x2c = min(frame_w, x2)
+-        y2c = min(frame_h, y2)
+-
+-        crop = frame_bgr[y1c:y2c, x1c:x2c]
+-        if pad_l or pad_t or pad_r or pad_b:
+-            crop = cv2.copyMakeBorder(
+-                crop, pad_t, pad_b, pad_l, pad_r,
+-                cv2.BORDER_CONSTANT, value=(0, 0, 0),
+-            )
+-
++        bw = max(1, right - left)
++        bh = max(1, bottom - top)
++        x, y = left, top
++
++        src_h, src_w = frame_bgr.shape[:2]
++
++        # Clamp scale so crop stays within frame
++        sc = min((src_h - 1) / bh, min((src_w - 1) / bw, scale))
++
++        nw = bw * sc
++        nh = bh * sc
++        cx = bw / 2 + x
++        cy = bh / 2 + y
++
++        ltx = cx - nw / 2
++        lty = cy - nh / 2
++        rbx = cx + nw / 2
++        rby = cy + nh / 2
++
++        # Shift into frame bounds (no padding)
++        if ltx < 0:
++            rbx -= ltx
++            ltx = 0
++        if lty < 0:
++            rby -= lty
++            lty = 0
++        if rbx > src_w - 1:
++            ltx -= rbx - src_w + 1
++            rbx = src_w - 1
++        if rby > src_h - 1:
++            lty -= rby - src_h + 1
++            rby = src_h - 1
++
++        crop = frame_bgr[int(lty): int(rby) + 1, int(ltx): int(rbx) + 1]
+         if crop.size == 0:
+             return np.zeros((out_size, out_size, 3), dtype=np.uint8)
+ 
+@@ -172,9 +182,9 @@ class CnnPadDetector:
+             try:
+                 crop = self._crop_for_scale(frame_bgr, bbox, scale, size)
+ 
+-                # MiniFASNet expects BGR, NCHW, float32 scaled to 0..1
+-                tensor = crop.astype(np.float32) / 255.0
+-                tensor = np.transpose(tensor, (2, 0, 1))
++                # MiniFASNet's to_tensor returns raw float32 (NOT /255).
++                # MiniVision's custom transform.py does img.float() only.
++                tensor = np.transpose(crop.astype(np.float32), (2, 0, 1))
+                 tensor = np.expand_dims(tensor, axis=0)
+ 
+                 raw = sess.run(None, {input_name: tensor})[0]

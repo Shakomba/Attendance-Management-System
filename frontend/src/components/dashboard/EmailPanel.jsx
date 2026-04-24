@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Mail, Send, FileText, Clock, AlertTriangle, Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { Mail, Send, FileText, Clock, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
+import { tName } from '../../lib/nameTranslation';
 
 /* ── Toast ─────────────────────────────────────────────────────── */
 const TOAST_MS = 5000
@@ -100,7 +101,7 @@ function ToastContainer({ toasts, onClose }) {
 
 /* ── EmailPanel ─────────────────────────────────────────────────── */
 export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearResult }) {
-    const { t } = useTranslation()
+    const { t, language } = useTranslation()
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [emailType, setEmailType] = useState(null)  // 'grade_report' | 'absence_report'
     const [toasts, setToasts] = useState([])
@@ -149,13 +150,12 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
             addToast('error', t('email_send_failed'), result.error)
             return
         }
-        const typeLabel = emailType === 'grade_report' ? t('email_send_grades') : t('email_send_absence')
         if (result.failed > 0 && result.sent === 0) {
-            addToast('error', typeLabel, t('email_failed'))
+            addToast('error', t('email_send_failed'))
         } else if (result.failed > 0) {
-            addToast('error', typeLabel, `${result.sent} ${t('email_sent_count')}, ${result.failed} ${t('email_failed_count')}.`)
+            addToast('error', t('email_send_failed'))
         } else {
-            addToast('success', typeLabel, t('email_success'))
+            addToast('success', t('email_success'))
             setSelectedIds(new Set())
         }
     }
@@ -242,7 +242,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                         <table className="w-full text-start text-sm whitespace-nowrap">
                             <thead className="sticky top-0 bg-bg border-b border-border text-xs uppercase text-secondary z-10">
                                 <tr>
-                                    <th className="px-6 py-3 font-medium w-10">
+                                    <th className="px-3 sm:px-6 py-3 font-medium w-10">
                                         <input
                                             type="checkbox"
                                             checked={allSelected}
@@ -251,10 +251,9 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                             className="accent-current cursor-pointer"
                                         />
                                     </th>
-                                    <th className="px-4 py-3 font-medium">{t('table_student')}</th>
-                                    <th className="px-4 py-3 font-medium hidden sm:table-cell">{t('enroll_email')}</th>
+                                    <th className="px-3 sm:px-4 py-3 font-medium text-start">{t('table_student')}</th>
+                                    <th className="px-4 py-3 font-medium text-start hidden sm:table-cell">{t('enroll_email')}</th>
                                     <th className="px-4 py-3 font-medium text-end hidden sm:table-cell">{t('gb_absence_hrs')}</th>
-                                    <th className="px-4 py-3 font-medium text-center">{t('table_status')}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
@@ -281,7 +280,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                                 />
                                             </td>
                                             <td className="px-3 sm:px-4 py-3">
-                                                <div className="font-medium text-primary">{s.FullName}</div>
+                                                <div className="font-medium text-primary">{tName(s.FullName, language)}</div>
                                                 {/* Mobile-only: show absent hrs below name */}
                                                 <div className="sm:hidden text-[11px] font-mono text-secondary mt-0.5">
                                                     {s.hoursAbsent.toFixed(1)} {t('email_hrs_absent')}
@@ -291,22 +290,6 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                             <td className={`px-4 py-3 text-end font-mono text-sm hidden sm:table-cell ${s.isDropped ? 'text-red-500 font-bold' : s.isAtRisk ? 'text-amber-500 font-semibold' : 'text-secondary'
                                                 }`}>
                                                 {s.hoursAbsent.toFixed(1)}
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border w-20 ${s.isDropped
-                                                    ? 'border-red-500/40 bg-red-500/15 text-red-500'
-                                                    : s.isAtRisk
-                                                        ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
-                                                        : 'border-border bg-surface text-secondary'
-                                                    }`}>
-                                                    {s.isDropped ? (
-                                                        <>{t('gb_status_dropped')}</>
-                                                    ) : s.isAtRisk ? (
-                                                        <><AlertTriangle size={11} /> {t('gb_status_at_risk')}</>
-                                                    ) : (
-                                                        t('gb_status_passing')
-                                                    )}
-                                                </span>
                                             </td>
                                         </tr>
                                     )

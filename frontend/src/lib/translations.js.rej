@@ -1,0 +1,23 @@
+diff a/frontend/src/lib/translations.js b/frontend/src/lib/translations.js	(rejected hunks)
+@@ -156,8 +156,8 @@ export const translations = {
+     email_send_absence: "Send Absence Reports",
+     email_send_grades: "Send Grade Reports",
+     email_sending: "Sending emails...",
+-    email_success: "Successfully sent to",
+-    email_failed: "Failed to send to",
++    email_success: "Successfully sent",
++    email_failed: "Failed to send",
+     email_send_failed: "Send Failed",
+     email_no_students: "No students available to email",
+     email_type_label: "Email Type",
+@@ -382,8 +382,8 @@ export const translations = {
+     email_send_absence: "ناردنی ڕاپۆرتی ئامادەبوون",
+     email_send_grades: "ناردنی ڕاپۆرتی نمرەکان",
+     email_sending: "ئیمەیڵەکان دەنێردرێن...",
+-    email_success: "بە سەرکەوتوویی نێردرا بۆ",
+-    email_failed: "ناردن شکستی هێنا بۆ",
++    email_success: "بە سەرکەوتوویی نێردرا",
++    email_failed: "ناردن شکستی هێنا",
+     email_send_failed: "ناردن سەرکەوتوو نەبوو",
+     email_no_students: "هیچ خوێندکارێک بەردەست نییە بۆ ئیمەیڵ",
+     email_type_label: "جۆری ئیمەیڵ",
