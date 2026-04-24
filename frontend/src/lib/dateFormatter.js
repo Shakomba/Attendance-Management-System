@@ -1,24 +1,28 @@
 export function formatDate(date, lang, useDefaultEn = false) {
   if (!date) return '';
+  
   if (lang === 'ckb') {
-    const d = date.getDate().toString().padStart(2, '0');
-    const m = (date.getMonth() + 1).toString().padStart(2, '0');
-    const y = date.getFullYear();
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Baghdad', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+    const d = parts.find(p => p.type === 'day').value;
+    const m = parts.find(p => p.type === 'month').value;
+    const y = parts.find(p => p.type === 'year').value;
     return `${d}/${m}/${y}`;
   }
   if (useDefaultEn) {
-    return date.toLocaleDateString();
+    return date.toLocaleDateString('en-US', { timeZone: 'Asia/Baghdad' });
   }
-  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  return date.toLocaleDateString(undefined, { timeZone: 'Asia/Baghdad', weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 export function formatTime(date, lang, useFull = false) {
   if (!date) return '';
   
   if (lang === 'ckb') {
-    let hours = date.getHours();
-    let minutes = date.getMinutes().toString().padStart(2, '0');
-    let seconds = date.getSeconds().toString().padStart(2, '0');
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Baghdad', hourCycle: 'h23', hour: 'numeric', minute: '2-digit', second: '2-digit' }).formatToParts(date);
+    let hours = parseInt(parts.find(p => p.type === 'hour').value, 10);
+    let minutes = parts.find(p => p.type === 'minute').value;
+    let seconds = parts.find(p => p.type === 'second')?.value || '00';
+    
     let ampm = hours >= 12 ? 'د.ن' : 'پ.ن';
     hours = hours % 12;
     hours = hours ? hours : 12; 
@@ -31,11 +35,10 @@ export function formatTime(date, lang, useFull = false) {
   }
   
   if (useFull) {
-      return date.toLocaleTimeString();
+      return date.toLocaleTimeString(undefined, { timeZone: 'Asia/Baghdad' });
   }
-  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString(undefined, { timeZone: 'Asia/Baghdad', hour: '2-digit', minute: '2-digit' });
 }
-
 
 export function formatDuration(ms, lang) {
   if (ms == null) return '';
