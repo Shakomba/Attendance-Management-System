@@ -248,7 +248,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                             checked={allSelected}
                                             ref={(el) => { if (el) el.indeterminate = someSelected }}
                                             onChange={toggleAll}
-                                            className="accent-current cursor-pointer"
+                                            className="accent-blue-500 cursor-pointer"
                                         />
                                     </th>
                                     <th className="px-3 sm:px-4 py-3 font-medium text-start">{t('table_student')}</th>
@@ -276,7 +276,7 @@ export function EmailPanel({ gradebook, courseId, sending, sendBulkEmail, clearR
                                                     type="checkbox"
                                                     checked={checked}
                                                     onChange={() => toggleStudent(s.StudentID)}
-                                                    className="accent-current cursor-pointer"
+                                                    className="accent-blue-500 cursor-pointer"
                                                 />
                                             </td>
                                             <td className="px-3 sm:px-4 py-3">
