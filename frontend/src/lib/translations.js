@@ -1,8 +1,8 @@
 export const translations = {
   en: {
     // Navigation & Common
-    app_title: "Attendance",
-    app_name: "Attendance",
+    app_title: "Attendify",
+    app_name: "Attendify",
     tab_dashboard: "Dashboard",
     tab_enrollment: "Enrollment",
     tab_gradebook: "Gradebook",
@@ -227,8 +227,8 @@ export const translations = {
   },
   ckb: {
     // Navigation & Common
-    app_title: "ئامادەبوون",
-    app_name: "ئامادەبوون",
+    app_title: "Attendify",
+    app_name: "Attendify",
     tab_dashboard: "داشبۆرد",
     tab_enrollment: "تۆمارکردن",
     tab_gradebook: "تۆماری نمرەکان",

@@ -134,7 +134,7 @@ export function LoginPage({ apiBase, onLogin }) {
         <div className="min-h-screen bg-bg flex items-center justify-center p-4 font-sans">
             <div className="w-full max-w-sm">
                 <div className="text-center mb-8">
-                    <div className="flex items-center justify-center gap-2.5 mb-3">
+                    <div className="flex items-center justify-center gap-2.5 mb-3" dir="ltr">
                         <UserCheck size={28} className="text-fg" />
                         <h1 className="font-mono font-bold text-2xl tracking-tight text-fg">
                             {t('app_name')}

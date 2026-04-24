@@ -18,7 +18,7 @@ export function DashboardLayout({ children, activeTab, setActiveTab, professor, 
 
             {/* ── Sidebar (desktop) ───────────────────────────────────────── */}
             <div className="hidden lg:flex w-64 bg-bg border-e border-border h-screen flex-col fixed top-0 start-0 shadow-sm z-50">
-                <div className="flex items-center gap-3 px-4 h-14 border-b border-border">
+                <div className="flex items-center gap-3 px-4 h-14 border-b border-border" dir="ltr">
                     <UserCheck size={22} className="text-fg" />
                     <span className="font-mono font-bold text-lg tracking-tight text-fg">{t('app_title')}</span>
                 </div>
