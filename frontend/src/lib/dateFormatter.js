@@ -1,3 +1,11 @@
+export function parseDateSafe(dateInput) {
+  if (!dateInput) return null;
+  if (typeof dateInput === 'string' && !dateInput.endsWith('Z')) {
+    return new Date(dateInput + 'Z');
+  }
+  return new Date(dateInput);
+}
+
 export function formatDate(date, lang, useDefaultEn = false) {
   if (!date) return '';
   
