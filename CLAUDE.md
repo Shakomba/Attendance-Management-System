@@ -17,11 +17,13 @@ Attendance-Management-System/
 │   ├── auth.py                  # JWT + WebAuthn auth
 │   ├── webauthn_service.py      # Passkey registration/verification
 │   ├── websocket_manager.py     # Multi-client WebSocket broadcasting
+│   ├── models/pad/              # MiniFASNet ONNX weights (gitignored, see below)
 │   └── services/
 │       ├── face_engine.py       # Face detection & embedding (CPU/GPU)
 │       ├── recognition_service.py # Recognition logic, cooldowns, caching
 │       ├── enrollment_service.py  # Multi-pose enrollment pipeline
-│       ├── spoof_detector.py    # Anti-spoofing (Laplacian/LBP/FFT)
+│       ├── spoof_detector.py    # CNN PAD + temporal aggregation
+│       ├── pad_cnn.py           # MiniFASNet ONNX ensemble (low-level)
 │       └── email_service.py     # HTML email templates + SMTP sending
 ├── frontend/src/
 │   ├── App.jsx                  # Main app component
@@ -72,6 +74,17 @@ cp .env.example .env   # then edit .env
 ./run_backend_311.sh
 # or: uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+### One-time: fetch anti-spoofing CNN weights
+```bash
+# From the repo root, install a CPU-only torch wheel and convert MiniFASNet
+# .pth -> .onnx.  Drops files in backend/app/models/pad/.  Required once.
+pip install "torch==2.1.*" --index-url https://download.pytorch.org/whl/cpu
+python scripts/convert_pad_models.py
+```
+If the ONNX files are missing at backend startup, the anti-spoof detector
+logs a warning and marks every frame as live — attendance still works, just
+with no protection against photo/video replay.
 
 ### Frontend
 ```bash
@@ -145,8 +158,25 @@ SMTP_DRY_RUN=true   # Set false for real emails
 1. Camera client sends binary JPEG frames over WebSocket
 2. Backend applies frame stride (every Nth frame) to reduce load
 3. Matching frames are queued for async recognition
-4. Hit → upserts `SessionAttendance` + broadcasts face overlay to dashboard socket
-5. Cooldown window prevents duplicate events
+4. For each detected face: identity match → CNN PAD with sliding-window
+   temporal aggregation → attendance upsert on pass
+5. Hit → upserts `SessionAttendance` + broadcasts face overlay to dashboard socket
+6. Cooldown window prevents duplicate events
+
+### Anti-Spoofing (PAD)
+- **Model**: MiniFASNet (Silent-Face-Anti-Spoofing, Apache-2.0), two-scale
+  ONNX ensemble — `2.7_80x80_MiniFASNetV2` + `4_0_0_80x80_MiniFASNetV1SE`.
+  Wider crop on the 2nd scale captures phone-screen bezels, defeating video
+  replay attacks.
+- **Runtime**: `onnxruntime` (CUDA provider used automatically in GPU mode).
+- **Temporal aggregation**: `SpoofDetector` keeps a sliding window of the
+  last N CNN predictions per `(session_id, student_id)`. Attendance is only
+  marked when at least `ANTISPOOF_REQUIRED_LIVE_FRAMES` of the last
+  `ANTISPOOF_WINDOW_FRAMES` predictions come back live. One odd frame can't
+  flip a verdict; a static photo can't accumulate enough live frames.
+- **Enrollment**: uses the single-frame `analyze(frame, bbox)` API; each pose
+  capture must individually pass the CNN check.
+- **No challenges**: no "turn your head left/right" prompts — fully passive.
 
 ### Embedding Cache
 `RecognitionService` caches known face embeddings for 60 seconds per course to avoid repeated DB reads.

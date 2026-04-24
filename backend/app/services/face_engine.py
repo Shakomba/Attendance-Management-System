@@ -17,15 +17,6 @@ class MatchResult:
 
 
 @dataclass
-class MultiMatchResult:
-    student_id: int
-    full_name: str
-    best_score: float  # best match confidence (same scale as MatchResult.score)
-    score_variance: float  # variance across pose matches — low = suspicious
-    is_suspicious: bool  # True if variance too low (possible photo spoof)
-
-
-@dataclass
 class FaceDetection:
     left: int
     top: int
@@ -259,87 +250,6 @@ class FaceEngine:
             return None
 
         return MatchResult(student_id=best_id, full_name=best_name, score=best_score)
-
-    def match_embedding_multi(
-        self,
-        candidate: np.ndarray,
-        known_faces_grouped: Dict[int, List[Dict]],
-    ) -> Optional[MultiMatchResult]:
-        """Match a candidate embedding against grouped multi-pose embeddings.
-
-        known_faces_grouped: {student_id: [{"embedding": np.ndarray, "full_name": str, "pose_label": str}, ...]}
-
-        Returns the best-matching student with score variance across poses.
-        A real face matches the front embedding well but side poses less well (high variance).
-        A photo matches all poses almost equally (low variance = suspicious).
-        """
-        if not known_faces_grouped:
-            return None
-
-        # Minimum variance to consider "natural" — below this is suspicious.
-        # GPU measured: photo variance=0.000189-0.000486, real face higher.
-        variance_threshold = 0.001 if self.mode == "cpu" else 0.0008
-
-        best_student_id: Optional[int] = None
-        best_full_name: str = ""
-        best_overall_score: float
-        best_variance: float = 0.0
-
-        if self.mode == "cpu":
-            best_overall_score = float("inf")
-            for student_id, poses in known_faces_grouped.items():
-                scores = []
-                for pose in poses:
-                    distance = float(np.linalg.norm(candidate - pose["embedding"]))
-                    scores.append(distance)
-
-                best_dist = min(scores)
-                if best_dist < best_overall_score:
-                    best_overall_score = best_dist
-                    best_student_id = student_id
-                    best_full_name = poses[0]["full_name"]
-                    best_variance = float(np.var(scores)) if len(scores) > 1 else 0.0
-
-            if best_student_id is None or best_overall_score > self.distance_threshold:
-                return None
-
-            confidence = max(0.0, 1.0 - best_overall_score)
-            return MultiMatchResult(
-                student_id=best_student_id,
-                full_name=best_full_name,
-                best_score=confidence,
-                score_variance=best_variance,
-                is_suspicious=best_variance < variance_threshold and len(known_faces_grouped.get(best_student_id, [])) > 1,
-            )
-
-        # GPU: cosine similarity (higher = better)
-        best_overall_score = -1.0
-        candidate_norm = candidate / (np.linalg.norm(candidate) + 1e-9)
-
-        for student_id, poses in known_faces_grouped.items():
-            scores = []
-            for pose in poses:
-                known_norm = pose["embedding"] / (np.linalg.norm(pose["embedding"]) + 1e-9)
-                similarity = float(np.dot(candidate_norm, known_norm))
-                scores.append(similarity)
-
-            best_sim = max(scores)
-            if best_sim > best_overall_score:
-                best_overall_score = best_sim
-                best_student_id = student_id
-                best_full_name = poses[0]["full_name"]
-                best_variance = float(np.var(scores)) if len(scores) > 1 else 0.0
-
-        if best_student_id is None or best_overall_score < self.similarity_threshold:
-            return None
-
-        return MultiMatchResult(
-            student_id=best_student_id,
-            full_name=best_full_name,
-            best_score=best_overall_score,
-            score_variance=best_variance,
-            is_suspicious=best_variance < variance_threshold and len(known_faces_grouped.get(best_student_id, [])) > 1,
-        )
 
     def validate_pose_diversity(self, embeddings: Dict[str, np.ndarray]) -> Tuple[bool, str]:
         """Validate that captured pose embeddings are sufficiently diverse.

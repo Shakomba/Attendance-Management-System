@@ -186,21 +186,20 @@ class EnrollmentService:
                 "total_poses": len(POSES),
             }
 
-        # Run spoof detection on the face crop.
-        crop = SpoofDetector.extract_face_crop(
-            frame_bgr, target.left, target.top, target.right, target.bottom,
+        # Run CNN-based PAD on the raw frame + bbox so the model sees the
+        # wider context (screen bezels, hand holding phone, etc.).
+        spoof_result = self.spoof_detector.analyze(
+            frame_bgr, (target.left, target.top, target.right, target.bottom),
         )
-        if crop is not None:
-            spoof_result = self.spoof_detector.analyze(crop)
-            if not spoof_result.is_live:
-                state.pose_consecutive_valid = 0  # reset hold counter
-                return {
-                    "type": "spoof_detected",
-                    "pose": current_pose,
-                    "reason": f"Flat image detected ({spoof_result.reason}). Please use your real face.",
-                    "progress": state.progress,
-                    "total_poses": len(POSES),
-                }
+        if not spoof_result.is_live:
+            state.pose_consecutive_valid = 0  # reset hold counter
+            return {
+                "type": "spoof_detected",
+                "pose": current_pose,
+                "reason": f"Flat image detected ({spoof_result.reason}). Please use your real face.",
+                "progress": state.progress,
+                "total_poses": len(POSES),
+            }
 
         embedding = target.embedding
 

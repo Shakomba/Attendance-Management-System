@@ -1,0 +1,48 @@
+services:
+  sqlserver:
+    ports:
+      - "1433:1433"
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend-base
+    image: ams_backend_local:latest
+    runtime: runc  # no nvidia required locally
+    ports:
+      - "8000:8000"
+    environment:
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      AI_MODE: "cpu"
+      WEBAUTHN_RP_ID: "localhost"
+      WEBAUTHN_ORIGIN: "http://localhost:5173"
+      WEBAUTHN_RP_NAME: "Attendify Local"
+      SMTP_DRY_RUN: "true"
+
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+      dockerfile_inline: |
+        FROM node:20-alpine AS build
+        WORKDIR /app
+        COPY frontend/package*.json ./
+        RUN npm ci --legacy-peer-deps
+        COPY frontend/. .
+        ARG VITE_API_BASE_URL
+        ENV VITE_API_BASE_URL=$$VITE_API_BASE_URL
+        RUN npm run build
+
+        FROM nginx:1.27-alpine
+        COPY --from=build /app/dist /usr/share/nginx/html
+        COPY nginx/local.conf /etc/nginx/conf.d/default.conf
+        EXPOSE 80
+    ports:
+      - "5173:80"
+
+  nginx:
+    profiles: ["prod-only"]  # disabled locally
+
+  certbot:
+    profiles: ["prod-only"]  # disabled locally

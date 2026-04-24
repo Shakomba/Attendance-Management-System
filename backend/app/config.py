@@ -42,14 +42,16 @@ class Settings:
     recognition_frame_stride: int = int(os.getenv("RECOGNITION_FRAME_STRIDE", "8"))
     recognition_event_cooldown_sec: int = int(os.getenv("RECOGNITION_EVENT_COOLDOWN_SEC", "20"))
 
-    # Anti-spoofing
+    # Anti-spoofing (CNN-based PAD — MiniFASNet ONNX ensemble).
     antispoof_enabled: bool = _as_bool(os.getenv("ANTISPOOF_ENABLED", "true"), True)
-    # Laplacian variance: real face ~200-800, phone screen ~80-200, print ~30-80.
-    antispoof_laplacian_threshold: float = float(os.getenv("ANTISPOOF_LAPLACIAN_THRESHOLD", "80.0"))
-    # LBP histogram std is in 0.003-0.010 range (normalized 256-bin hist). Old default 0.25 was wrong scale.
-    antispoof_lbp_threshold: float = float(os.getenv("ANTISPOOF_LBP_THRESHOLD", "0.004"))
-    antispoof_frequency_threshold: float = float(os.getenv("ANTISPOOF_FREQUENCY_THRESHOLD", "0.35"))
-    antispoof_combined_threshold: float = float(os.getenv("ANTISPOOF_COMBINED_THRESHOLD", "0.45"))
+    # Per-frame live probability needed before that frame counts as live.
+    antispoof_live_threshold: float = float(os.getenv("ANTISPOOF_LIVE_THRESHOLD", "0.55"))
+    # Sliding window size (frames) for temporal aggregation during recognition.
+    antispoof_window_frames: int = int(os.getenv("ANTISPOOF_WINDOW_FRAMES", "6"))
+    # How many frames in the window must be classified live to pass.
+    antispoof_required_live_frames: int = int(os.getenv("ANTISPOOF_REQUIRED_LIVE_FRAMES", "4"))
+    # Tracks idle beyond this many seconds are pruned from the temporal cache.
+    antispoof_track_ttl_sec: float = float(os.getenv("ANTISPOOF_TRACK_TTL_SEC", "8.0"))
 
     # Enrollment
     enrollment_pose_distance_threshold: float = float(os.getenv("ENROLLMENT_POSE_DISTANCE_THRESHOLD", "0.15"))
