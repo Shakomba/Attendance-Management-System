@@ -29,3 +29,6 @@ student_photos/
 backend/app/models/pad/*.onnx
 backend/app/models/pad/*.pth
 backend/app/models/pad/_tmp_minivision/
+
+# Git worktrees
+.worktrees/
