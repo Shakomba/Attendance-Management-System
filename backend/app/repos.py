@@ -227,11 +227,12 @@ class Repository:
 
     @staticmethod
     def create_student_and_enroll(payload: Dict[str, Any]) -> Dict[str, Any]:
-        student_code = payload["student_code"]
         full_name = payload["full_name"]
+        full_name_kurdish = payload.get("full_name_kurdish")
         email = payload["email"]
         profile_photo_url = payload.get("profile_photo_url")
         course_id = payload["course_id"]
+        student_code = f"STU-{uuid.uuid4().hex[:8].upper()}"
 
         grades = payload.get("grades", {})
         grade_tuple: Tuple[Any, ...] = (
@@ -248,18 +249,20 @@ class Repository:
 
             cursor.execute(
                 """
-                INSERT INTO dbo.Students (StudentCode, FullName, Email, ProfilePhotoUrl)
+                INSERT INTO dbo.Students
+                    (StudentCode, FullName, FullNameKurdish, Email, ProfilePhotoUrl)
                 OUTPUT INSERTED.StudentID
-                VALUES (?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?);
                 """,
-                (student_code, full_name, email, profile_photo_url),
+                (student_code, full_name, full_name_kurdish, email, profile_photo_url),
             )
             student_id = cursor.fetchone()[0]
 
             cursor.execute(
                 """
                 INSERT INTO dbo.Enrollments
-                    (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade, AssignmentGrade, MidtermGrade, FinalExamGrade)
+                    (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade,
+                     AssignmentGrade, MidtermGrade, FinalExamGrade)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (student_id, course_id, *grade_tuple),
@@ -325,7 +328,13 @@ class Repository:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE dbo.Students SET EnrollmentStatus = N'enrolled' WHERE StudentID = ?;",
+                """
+                UPDATE dbo.Students
+                SET EnrollmentStatus  = N'enrolled',
+                    FaceDeletedBySelf = 0,
+                    FaceDeletedAt     = NULL
+                WHERE StudentID = ?;
+                """,
                 (student_id,),
             )
             conn.commit()
@@ -342,8 +351,9 @@ class Repository:
     def list_course_students(course_id: int) -> List[Dict[str, Any]]:
         return fetch_all(
             """
-            SELECT s.StudentID, s.StudentCode, s.FullName, s.Email,
-                   ISNULL(s.EnrollmentStatus, N'pending') AS EnrollmentStatus
+            SELECT s.StudentID, s.StudentCode, s.FullName, s.FullNameKurdish, s.Email,
+                   ISNULL(s.EnrollmentStatus, N'pending') AS EnrollmentStatus,
+                   s.FaceDeletedBySelf, s.FaceDeletedAt
             FROM dbo.Students s
             INNER JOIN dbo.Enrollments e ON e.StudentID = s.StudentID
             WHERE e.CourseID = ? AND s.IsActive = 1
