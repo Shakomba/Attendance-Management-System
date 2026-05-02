@@ -14,10 +14,9 @@ class GradesPayload(BaseModel):
 
 
 class StudentCreateRequest(BaseModel):
-    student_code: str = Field(min_length=1, max_length=30)
     full_name: str = Field(min_length=2, max_length=120)
+    full_name_kurdish: Optional[str] = Field(default=None, max_length=120)
     email: EmailStr
-    profile_photo_url: Optional[str] = None
     course_id: int
     grades: GradesPayload = Field(default_factory=GradesPayload)
 
@@ -55,18 +54,23 @@ class ManualAttendanceUpdateRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=50)
+    username: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1, max_length=128)
 
 
 class LoginResponse(BaseModel):
-    professor_id: int
-    username: str
-    full_name: str
-    course_id: int
+    access_token: str = ""
+    role: str = "professor"
+    # Professor-only fields
+    professor_id: Optional[int] = None
+    username: Optional[str] = None
+    course_id: Optional[int] = None
     course_name: Optional[str] = None
     course_code: Optional[str] = None
-    access_token: str = ""
+    # Student-only fields
+    student_id: Optional[int] = None
+    full_name: Optional[str] = None
+    full_name_kurdish: Optional[str] = None
 
 
 class GenericMessage(BaseModel):
@@ -99,3 +103,22 @@ class EnrollmentStatusResponse(BaseModel):
     enrollment_status: str  # 'pending' or 'enrolled'
     captured_poses: List[str]
     remaining_poses: List[str]
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+
+class StudentPortalCourse(BaseModel):
+    course_name: str
+    hours_absent: float
+
+
+class StudentPortalResponse(BaseModel):
+    full_name: str
+    full_name_kurdish: Optional[str] = None
+    courses: List[StudentPortalCourse]
+    face_enrolled: bool
+    face_deleted_by_self: bool
+    face_deleted_at: Optional[str] = None
