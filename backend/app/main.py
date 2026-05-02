@@ -474,7 +474,15 @@ def create_student(
 ) -> GenericMessage:
     _require_course(professor, payload.course_id)
     result = repo.create_student_and_enroll(payload.model_dump())
-    return GenericMessage(message="Student created and enrolled.", data=result)
+    token = repo.create_invite_token(result["student_id"])
+    magic_link = f"{settings.frontend_url}?invite={token}"
+    email_service.send_invite_email(
+        student_email=payload.email,
+        full_name=payload.full_name,
+        full_name_kurdish=payload.full_name_kurdish,
+        magic_link=magic_link,
+    )
+    return GenericMessage(message="Student created and invite sent.", data=result)
 
 
 @app.post("/api/students/{student_id}/face", response_model=GenericMessage)
