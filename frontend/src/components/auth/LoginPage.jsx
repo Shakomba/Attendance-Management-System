@@ -79,6 +79,13 @@ export function LoginPage({ apiBase, onLogin }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
             })
+            if (res.status === 403) {
+                const body = await res.json().catch(() => ({}))
+                if (body.detail === 'account_not_setup') {
+                    setError(t('login_account_not_setup'))
+                    return
+                }
+            }
             const data = await res.json()
             if (!res.ok) throw new Error(data?.detail || t('login_failed'))
             onLogin(data)
@@ -152,7 +159,7 @@ export function LoginPage({ apiBase, onLogin }) {
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-fg mb-1.5">
-                                {t('login_username')}
+                                {t('login_username_or_email')}
                             </label>
                             <input
                                 type="text"
