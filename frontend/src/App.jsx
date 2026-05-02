@@ -8,6 +8,8 @@ import { useEmail } from "./hooks/useEmail";
 import { useEnrollment } from "./hooks/useEnrollment";
 
 import { LoginPage } from "./components/auth/LoginPage";
+import { PasswordSetup } from './components/student/PasswordSetup'
+import { StudentPortal } from './components/student/StudentPortal'
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { StatCards } from "./components/dashboard/StatCards";
 import { CameraFeed } from "./components/dashboard/CameraFeed";
@@ -103,18 +105,41 @@ export default function App() {
     }
   });
 
+  const [student, setStudent] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ams_student')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
+
+  const [inviteToken, setInviteToken] = useState(null)
+
   const handleLogin = (data) => {
-    const { access_token, ...profile } = data;
-    if (access_token) localStorage.setItem("ams_token", access_token);
-    localStorage.setItem("ams_professor", JSON.stringify(profile));
-    setProfessor(profile);
-  };
+    const { access_token, role, ...profile } = data
+    if (access_token) localStorage.setItem('ams_token', access_token)
+    if (role === 'student') {
+      localStorage.setItem('ams_student', JSON.stringify({ ...profile, role }))
+      setStudent({ ...profile, role })
+    } else {
+      localStorage.setItem('ams_professor', JSON.stringify({ ...profile, role: 'professor' }))
+      setProfessor({ ...profile, role: 'professor' })
+    }
+  }
 
   const handleLogout = () => {
     localStorage.removeItem("ams_professor");
     localStorage.removeItem("ams_token");
     setProfessor(null);
   };
+
+  const handleStudentLogout = () => {
+    localStorage.removeItem('ams_token')
+    localStorage.removeItem('ams_student')
+    setStudent(null)
+    setInviteToken(null)
+  }
 
   // Global Hooks
   const { apiBase, apiFetch, courseId, setCourseId, loadBootstrap } = useApi();
@@ -220,6 +245,21 @@ export default function App() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const invite = params.get('invite')
+    if (!invite) return
+    window.history.replaceState({}, '', '/')
+    fetch(`${apiBase}/api/auth/invite?token=${encodeURIComponent(invite)}`)
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.detail || 'Invalid link')
+        localStorage.setItem('ams_token', data.access_token)
+        setInviteToken(data.access_token)
+      })
+      .catch((err) => console.error('Invite link error:', err.message))
+  }, [])
 
   // Sync course from logged-in professor
   useEffect(() => {
@@ -602,6 +642,49 @@ export default function App() {
     );
   };
 
+  // Magic link invite — show password setup
+  if (inviteToken) {
+    return (
+      <I18nProvider language={language}>
+        <PasswordSetup
+          apiBase={apiBase}
+          token={inviteToken}
+          onComplete={(data) => {
+            setInviteToken(null)
+            handleLogin(data)
+          }}
+        />
+      </I18nProvider>
+    )
+  }
+
+  // Student portal
+  if (student) {
+    return (
+      <I18nProvider language={language}>
+        <StudentPortal
+          apiBase={apiBase}
+          student={student}
+          onLogout={handleStudentLogout}
+          theme={theme}
+          toggleTheme={() => {
+            const next = theme === 'dark' ? 'light' : 'dark'
+            setTheme(next)
+            localStorage.setItem('ams_theme', next)
+            localStorage.setItem('ams_theme_manual', 'true')
+          }}
+          language={language}
+          toggleLanguage={() => {
+            const next = language === 'en' ? 'ckb' : 'en'
+            setLanguage(next)
+            localStorage.setItem('ams_language', next)
+          }}
+        />
+      </I18nProvider>
+    )
+  }
+
+  // Professor login gate
   if (!professor) {
     return (
       <I18nProvider language={language}>
