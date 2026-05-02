@@ -247,6 +247,55 @@ def set_student_password(
     }
 
 
+@app.get("/api/student/portal", response_model=StudentPortalResponse)
+def get_student_portal(student: dict = Depends(get_current_student)) -> StudentPortalResponse:
+    student_id = int(student["sub"])
+    data = repo.get_student_portal_data(student_id)
+    return StudentPortalResponse(**data)
+
+
+@app.delete("/api/student/face")
+def delete_student_face(student: dict = Depends(get_current_student)):
+    student_id = int(student["sub"])
+    data = repo.get_student_portal_data(student_id)
+    if not data["face_enrolled"]:
+        raise HTTPException(status_code=400, detail="no_face_enrolled")
+    repo.delete_student_face(student_id)
+    if recognition_service:
+        try:
+            recognition_service.reload_embeddings()
+        except Exception:
+            pass
+    return {"message": "Face ID deleted successfully."}
+
+
+def _get_student_by_id(student_id: int):
+    from .database import fetch_one as _fetch_one
+    return _fetch_one(
+        "SELECT StudentID, FullName, FullNameKurdish, Email FROM dbo.Students WHERE StudentID = ? AND IsActive = 1;",
+        (student_id,),
+    )
+
+
+@app.post("/api/students/{student_id}/invite/resend")
+def resend_invite(
+    student_id: int,
+    professor: dict = Depends(get_current_professor),
+):
+    student = _get_student_by_id(student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    token = repo.create_invite_token(student_id)
+    magic_link = f"{settings.frontend_url}?invite={token}"
+    email_service.send_invite_email(
+        student_email=student["Email"],
+        full_name=student["FullName"],
+        full_name_kurdish=student["FullNameKurdish"],
+        magic_link=magic_link,
+    )
+    return {"sent": True}
+
+
 # ── Profile update ──────────────────────────────────────────────────────────
 @app.patch("/api/auth/profile")
 def update_profile(payload: dict, professor: dict = Depends(get_current_professor)) -> LoginResponse:
