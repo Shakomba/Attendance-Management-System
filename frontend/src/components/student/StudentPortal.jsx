@@ -66,6 +66,16 @@ export function StudentPortal({ apiBase, student, onLogout, theme, toggleTheme, 
     )
   }
 
+  if (error && !portal) {
+    return (
+      <div className="min-h-screen bg-bg flex items-center justify-center p-4">
+        <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-sm px-4 py-3 max-w-sm text-center">
+          {error}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-bg">
       {/* Header */}

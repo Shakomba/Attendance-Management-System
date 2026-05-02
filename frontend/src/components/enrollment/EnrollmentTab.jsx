@@ -267,7 +267,7 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                 </button>
                 <button
                   type="submit"
-                  disabled={addLoading}
+                  disabled={addLoading || !courseId}
                   className="flex-1 py-2 bg-fg text-bg text-sm font-medium rounded-sm hover:opacity-80 disabled:opacity-40 transition-opacity cursor-pointer"
                 >
                   {addLoading ? '...' : t('add_student_submit')}

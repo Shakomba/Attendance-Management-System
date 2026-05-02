@@ -72,7 +72,7 @@ def get_current_professor(authorization: str = Header(default="")) -> Dict:
             detail="Token is invalid or has expired.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if payload.get("role", "professor") != "professor":
+    if payload.get("role") != "professor":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Professor access only.",

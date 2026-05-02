@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import bcrypt as _bcrypt
 import csv
 import io
 import json
@@ -175,7 +176,6 @@ def login(request: Request, payload: LoginRequest):
     if student:
         if student["PasswordHash"] is None:
             raise HTTPException(status_code=403, detail="account_not_setup")
-        import bcrypt as _bcrypt
         if not _bcrypt.checkpw(payload.password.encode(), student["PasswordHash"].encode()):
             raise HTTPException(status_code=401, detail="Invalid username or password.")
         token = create_student_token(
@@ -209,6 +209,7 @@ def validate_invite(token: str):
         expires = expires.replace(tzinfo=timezone.utc)
     if expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="token_expired")
+    repo.mark_all_tokens_used_for_student(record["StudentID"])
     one_time = create_student_token(
         student_id=record["StudentID"],
         full_name=record["FullName"],
@@ -227,7 +228,6 @@ def set_student_password(
     """First-time password setup — requires the one-time invite JWT."""
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match.")
-    import bcrypt as _bcrypt
     hashed = _bcrypt.hashpw(payload.password.encode(), _bcrypt.gensalt()).decode()
     student_id = int(student["sub"])
     repo.set_student_password(student_id, hashed)
@@ -251,6 +251,8 @@ def set_student_password(
 def get_student_portal(student: dict = Depends(get_current_student)) -> StudentPortalResponse:
     student_id = int(student["sub"])
     data = repo.get_student_portal_data(student_id)
+    if data is None:
+        raise HTTPException(status_code=403, detail="Account is inactive.")
     return StudentPortalResponse(**data)
 
 
@@ -258,6 +260,8 @@ def get_student_portal(student: dict = Depends(get_current_student)) -> StudentP
 def delete_student_face(student: dict = Depends(get_current_student)):
     student_id = int(student["sub"])
     data = repo.get_student_portal_data(student_id)
+    if data is None:
+        raise HTTPException(status_code=403, detail="Account is inactive.")
     if not data["face_enrolled"]:
         raise HTTPException(status_code=400, detail="no_face_enrolled")
     repo.delete_student_face(student_id)
@@ -285,6 +289,10 @@ def resend_invite(
     student = _get_student_by_id(student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found.")
+    enrollment = repo.get_student_enrollment_by_course(student_id, professor["course_id"])
+    if not enrollment:
+        raise HTTPException(status_code=403, detail="Student is not enrolled in your course.")
+    repo.mark_all_tokens_used_for_student(student_id)
     token = repo.create_invite_token(student_id)
     magic_link = f"{settings.frontend_url}?invite={token}"
     email_service.send_invite_email(
@@ -317,10 +325,9 @@ def update_profile(payload: dict, professor: dict = Depends(get_current_professo
         if not existing:
             raise HTTPException(status_code=404, detail="Professor not found.")
         stored_hash: str = existing.get("PasswordHash", "") or ""
-        import bcrypt as _bcrypt_mod
-        if not _bcrypt_mod.checkpw(current_password.encode(), stored_hash.encode()):
+        if not _bcrypt.checkpw(current_password.encode(), stored_hash.encode()):
             raise HTTPException(status_code=400, detail="Current password is incorrect.")
-        new_password_hash = _bcrypt_mod.hashpw(new_password.encode(), _bcrypt_mod.gensalt()).decode()
+        new_password_hash = _bcrypt.hashpw(new_password.encode(), _bcrypt.gensalt()).decode()
 
     result = repo.update_professor_profile(
         professor_id=professor_id,

@@ -255,7 +255,6 @@ export default function App() {
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.detail || 'Invalid link')
-        localStorage.setItem('ams_token', data.access_token)
         setInviteToken(data.access_token)
       })
       .catch((err) => console.error('Invite link error:', err.message))

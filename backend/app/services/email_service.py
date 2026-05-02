@@ -467,7 +467,15 @@ class EmailService:
         full_name_kurdish,
         magic_link: str,
     ) -> None:
-        kurdish_name = full_name_kurdish or full_name
+        if settings.smtp_dry_run:
+            import logging
+            logging.getLogger(__name__).info(
+                "DRY RUN: invite email to %s suppressed", student_email
+            )
+            return
+        import html as _html
+        full_name = _html.escape(full_name)
+        kurdish_name = _html.escape(full_name_kurdish or full_name)
         html = f"""<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>

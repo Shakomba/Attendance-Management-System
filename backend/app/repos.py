@@ -108,15 +108,24 @@ class Repository:
             conn.commit()
 
     @staticmethod
-    def get_student_portal_data(student_id: int) -> Dict[str, Any]:
+    def get_student_enrollment_by_course(student_id: int, course_id: int) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            "SELECT EnrollmentID FROM dbo.Enrollments WHERE StudentID = ? AND CourseID = ?;",
+            (student_id, course_id),
+        )
+
+    @staticmethod
+    def get_student_portal_data(student_id: int) -> Optional[Dict[str, Any]]:
         student = fetch_one(
             """
             SELECT StudentID, FullName, FullNameKurdish,
                    FaceDeletedBySelf, FaceDeletedAt
-            FROM dbo.Students WHERE StudentID = ?;
+            FROM dbo.Students WHERE StudentID = ? AND IsActive = 1;
             """,
             (student_id,),
         )
+        if not student:
+            return None
         courses = fetch_all(
             """
             SELECT c.CourseName, e.HoursAbsentTotal
