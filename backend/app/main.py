@@ -17,7 +17,14 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from .auth import create_access_token, decode_token, get_current_professor
+from .auth import (
+    create_access_token,
+    create_student_token,
+    decode_token,
+    get_current_professor,
+    get_current_student,
+    get_current_student_invite,
+)
 from .config import settings
 from . import webauthn_service as _wa
 from .repos import Repository
@@ -32,9 +39,11 @@ from .schemas import (
     LoginRequest,
     LoginResponse,
     ManualAttendanceUpdateRequest,
+    SetPasswordRequest,
     StartSessionRequest,
     StartSessionResponse,
     StudentCreateRequest,
+    StudentPortalResponse,
 )
 from .services.email_service import EmailService
 from .services.enrollment_service import EnrollmentService
@@ -144,18 +153,98 @@ def _get_session_or_403(professor: dict, session_id: str):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-@app.post("/api/auth/login", response_model=LoginResponse)
+@app.post("/api/auth/login")
 @limiter.limit("10/minute")
-def login(request: Request, payload: LoginRequest) -> LoginResponse:
+def login(request: Request, payload: LoginRequest):
+    # Try professor first (by username)
     result = repo.authenticate_professor(payload.username, payload.password)
-    if not result:
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
-    token = create_access_token(
-        professor_id=result["professor_id"],
-        username=result["username"],
-        course_id=result["course_id"],
+    if result:
+        token = create_access_token(
+            professor_id=result["professor_id"],
+            username=result["username"],
+            course_id=result["course_id"],
+        )
+        return {
+            **result,
+            "access_token": token,
+            "role": "professor",
+        }
+
+    # Try student (by email)
+    student = repo.get_student_by_email(payload.username)
+    if student:
+        if student["PasswordHash"] is None:
+            raise HTTPException(status_code=403, detail="account_not_setup")
+        import bcrypt as _bcrypt
+        if not _bcrypt.checkpw(payload.password.encode(), student["PasswordHash"].encode()):
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+        token = create_student_token(
+            student_id=student["StudentID"],
+            full_name=student["FullName"],
+            full_name_kurdish=student["FullNameKurdish"],
+            password_set=True,
+        )
+        return {
+            "access_token": token,
+            "role": "student",
+            "student_id": student["StudentID"],
+            "full_name": student["FullName"],
+            "full_name_kurdish": student["FullNameKurdish"],
+        }
+
+    raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+
+@app.get("/api/auth/invite")
+def validate_invite(token: str):
+    """Validate a magic-link token and return a short-lived one-time student JWT."""
+    from datetime import datetime, timezone
+    record = repo.get_invite_token(token)
+    if not record:
+        raise HTTPException(status_code=410, detail="token_expired")
+    if record["UsedAt"] is not None:
+        raise HTTPException(status_code=410, detail="token_used")
+    expires = record["ExpiresAt"]
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="token_expired")
+    one_time = create_student_token(
+        student_id=record["StudentID"],
+        full_name=record["FullName"],
+        full_name_kurdish=record["FullNameKurdish"],
+        password_set=False,
+        expire_minutes=15,
     )
-    return LoginResponse(**result, access_token=token)
+    return {"access_token": one_time, "role": "student", "password_set": False}
+
+
+@app.post("/api/auth/student/set-password")
+def set_student_password(
+    payload: SetPasswordRequest,
+    student: dict = Depends(get_current_student_invite),
+):
+    """First-time password setup — requires the one-time invite JWT."""
+    if payload.password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match.")
+    import bcrypt as _bcrypt
+    hashed = _bcrypt.hashpw(payload.password.encode(), _bcrypt.gensalt()).decode()
+    student_id = int(student["sub"])
+    repo.set_student_password(student_id, hashed)
+    repo.mark_all_tokens_used_for_student(student_id)
+    full_token = create_student_token(
+        student_id=student_id,
+        full_name=student["full_name"],
+        full_name_kurdish=student.get("full_name_kurdish"),
+        password_set=True,
+    )
+    return {
+        "access_token": full_token,
+        "role": "student",
+        "student_id": student_id,
+        "full_name": student["full_name"],
+        "full_name_kurdish": student.get("full_name_kurdish"),
+    }
 
 
 # ── Profile update ──────────────────────────────────────────────────────────
