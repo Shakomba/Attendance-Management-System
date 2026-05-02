@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -39,6 +41,71 @@ class Repository:
             "course_name": row["CourseName"],
             "course_code": row["CourseCode"],
         }
+
+    @staticmethod
+    def get_student_by_email(email: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT StudentID, FullName, FullNameKurdish, Email,
+                   PasswordHash, FaceDeletedBySelf, FaceDeletedAt
+            FROM dbo.Students
+            WHERE Email = ? AND IsActive = 1;
+            """,
+            (email,),
+        )
+
+    @staticmethod
+    def set_student_password(student_id: int, password_hash: str) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE dbo.Students SET PasswordHash = ? WHERE StudentID = ?;",
+                (password_hash, student_id),
+            )
+            conn.commit()
+
+    @staticmethod
+    def create_invite_token(student_id: int) -> str:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO dbo.StudentInviteTokens (StudentID, Token, ExpiresAt)
+                VALUES (?, ?, ?);
+                """,
+                (student_id, token, expires_at),
+            )
+            conn.commit()
+        return token
+
+    @staticmethod
+    def get_invite_token(token: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT t.TokenID, t.StudentID, t.Token, t.ExpiresAt, t.UsedAt,
+                   s.FullName, s.FullNameKurdish, s.Email
+            FROM dbo.StudentInviteTokens t
+            JOIN dbo.Students s ON s.StudentID = t.StudentID
+            WHERE t.Token = ?;
+            """,
+            (token,),
+        )
+
+    @staticmethod
+    def mark_all_tokens_used_for_student(student_id: int) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE dbo.StudentInviteTokens
+                SET UsedAt = SYSUTCDATETIME()
+                WHERE StudentID = ? AND UsedAt IS NULL;
+                """,
+                (student_id,),
+            )
+            conn.commit()
 
     @staticmethod
     def update_professor_profile(
