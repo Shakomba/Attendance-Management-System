@@ -459,3 +459,61 @@ class EmailService:
             "failed": failed,
             "results": results,
         }
+
+    def send_invite_email(
+        self,
+        student_email: str,
+        full_name: str,
+        full_name_kurdish,
+        magic_link: str,
+    ) -> None:
+        if settings.smtp_dry_run:
+            import logging
+            logging.getLogger(__name__).info(
+                "DRY RUN: invite email to %s suppressed", student_email
+            )
+            return
+        import html as _html
+        full_name = _html.escape(full_name)
+        kurdish_name = _html.escape(full_name_kurdish or full_name)
+        html = f"""<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0f0f0f;font-family:system-ui,sans-serif;">
+  <div style="max-width:560px;margin:40px auto;background:#1a1a1a;border-radius:8px;overflow:hidden;border:1px solid #2a2a2a;">
+    <div style="background:#fff;padding:24px 32px;">
+      <h1 style="margin:0;font-size:20px;font-weight:700;color:#0f0f0f;letter-spacing:-0.5px;">Attendify</h1>
+    </div>
+    <div style="padding:32px;">
+      <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#fff;">Hello, {full_name}</h2>
+      <p style="margin:0 0 24px;font-size:14px;color:#a1a1aa;line-height:1.6;">
+        Your professor has added you to Attendify. Click the button below to set up your account and access your attendance portal.
+      </p>
+      <a href="{magic_link}" style="display:inline-block;padding:12px 28px;background:#fff;color:#0f0f0f;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">
+        Set Up My Account
+      </a>
+      <p style="margin:24px 0 0;font-size:12px;color:#52525b;">
+        This link expires in 48 hours. If you did not expect this email, you can safely ignore it.
+      </p>
+    </div>
+    <hr style="border:none;border-top:1px solid #2a2a2a;margin:0;">
+    <div style="padding:32px;" dir="rtl">
+      <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#fff;">سڵاو، {kurdish_name}</h2>
+      <p style="margin:0 0 24px;font-size:14px;color:#a1a1aa;line-height:1.6;">
+        مامۆستاکەت تۆی زیاد کردووە بۆ سیستەمی ئەتێندیفای. کلیک بکە لەسەر دووگمەی خوارەوە بۆ دامەزراندنی ئەکاونتەکەت و دەستگەیشتن بە پۆرتاڵی ئامادەبوونەکەت.
+      </p>
+      <a href="{magic_link}" style="display:inline-block;padding:12px 28px;background:#fff;color:#0f0f0f;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">
+        دامەزراندنی ئەکاونتەکەم
+      </a>
+      <p style="margin:24px 0 0;font-size:12px;color:#52525b;">
+        ئەم لینکە ٤٨ کاتژمێر دەمێنێتەوە. ئەگەر چاوەڕوانی ئەم ئیمەیڵەت نەبوو، دەتوانیت پشتگوێیبخەیت.
+      </p>
+    </div>
+  </div>
+</body>
+</html>"""
+        self._send_email(
+            student_email,
+            "You've been added to Attendify — Set up your account",
+            html,
+        )

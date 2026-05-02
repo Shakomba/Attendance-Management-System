@@ -68,6 +68,7 @@ class Settings:
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
     resend_api_url: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
     resend_timeout_sec: float = float(os.getenv("RESEND_TIMEOUT_SEC", "15"))
+    frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     # JWT — set JWT_SECRET_KEY in .env before deploying to production
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_USE_A_LONG_RANDOM_SECRET")

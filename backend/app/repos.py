@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -39,6 +41,139 @@ class Repository:
             "course_name": row["CourseName"],
             "course_code": row["CourseCode"],
         }
+
+    @staticmethod
+    def get_student_by_email(email: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT StudentID, FullName, FullNameKurdish, Email,
+                   PasswordHash, FaceDeletedBySelf, FaceDeletedAt
+            FROM dbo.Students
+            WHERE Email = ? AND IsActive = 1;
+            """,
+            (email,),
+        )
+
+    @staticmethod
+    def set_student_password(student_id: int, password_hash: str) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE dbo.Students SET PasswordHash = ? WHERE StudentID = ?;",
+                (password_hash, student_id),
+            )
+            conn.commit()
+
+    @staticmethod
+    def create_invite_token(student_id: int) -> str:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO dbo.StudentInviteTokens (StudentID, Token, ExpiresAt)
+                VALUES (?, ?, ?);
+                """,
+                (student_id, token, expires_at),
+            )
+            conn.commit()
+        return token
+
+    @staticmethod
+    def get_invite_token(token: str) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            """
+            SELECT t.TokenID, t.StudentID, t.Token, t.ExpiresAt, t.UsedAt,
+                   s.FullName, s.FullNameKurdish, s.Email
+            FROM dbo.StudentInviteTokens t
+            JOIN dbo.Students s ON s.StudentID = t.StudentID
+            WHERE t.Token = ?;
+            """,
+            (token,),
+        )
+
+    @staticmethod
+    def mark_all_tokens_used_for_student(student_id: int) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE dbo.StudentInviteTokens
+                SET UsedAt = SYSUTCDATETIME()
+                WHERE StudentID = ? AND UsedAt IS NULL;
+                """,
+                (student_id,),
+            )
+            conn.commit()
+
+    @staticmethod
+    def get_student_enrollment_by_course(student_id: int, course_id: int) -> Optional[Dict[str, Any]]:
+        return fetch_one(
+            "SELECT EnrollmentID FROM dbo.Enrollments WHERE StudentID = ? AND CourseID = ?;",
+            (student_id, course_id),
+        )
+
+    @staticmethod
+    def get_student_portal_data(student_id: int) -> Optional[Dict[str, Any]]:
+        student = fetch_one(
+            """
+            SELECT StudentID, FullName, FullNameKurdish,
+                   FaceDeletedBySelf, FaceDeletedAt
+            FROM dbo.Students WHERE StudentID = ? AND IsActive = 1;
+            """,
+            (student_id,),
+        )
+        if not student:
+            return None
+        courses = fetch_all(
+            """
+            SELECT c.CourseName, e.HoursAbsentTotal
+            FROM dbo.Enrollments e
+            JOIN dbo.Courses c ON c.CourseID = e.CourseID
+            WHERE e.StudentID = ?;
+            """,
+            (student_id,),
+        )
+        face_row = fetch_one(
+            "SELECT COUNT(*) AS cnt FROM dbo.StudentFaceEmbeddings WHERE StudentID = ?;",
+            (student_id,),
+        )
+        deleted_at = student["FaceDeletedAt"]
+        return {
+            "full_name": student["FullName"],
+            "full_name_kurdish": student["FullNameKurdish"],
+            "courses": [
+                {
+                    "course_name": row["CourseName"],
+                    "hours_absent": float(row["HoursAbsentTotal"]),
+                }
+                for row in courses
+            ],
+            "face_enrolled": (face_row["cnt"] > 0),
+            "face_deleted_by_self": bool(student["FaceDeletedBySelf"]),
+            "face_deleted_at": deleted_at.isoformat() if deleted_at else None,
+        }
+
+    @staticmethod
+    def delete_student_face(student_id: int) -> None:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM dbo.StudentFaceEmbeddings WHERE StudentID = ?;",
+                (student_id,),
+            )
+            cursor.execute(
+                """
+                UPDATE dbo.Students
+                SET FaceDeletedBySelf = 1,
+                    FaceDeletedAt     = SYSUTCDATETIME(),
+                    EnrollmentStatus  = N'pending'
+                WHERE StudentID = ?;
+                """,
+                (student_id,),
+            )
+            conn.commit()
 
     @staticmethod
     def update_professor_profile(
@@ -101,11 +236,12 @@ class Repository:
 
     @staticmethod
     def create_student_and_enroll(payload: Dict[str, Any]) -> Dict[str, Any]:
-        student_code = payload["student_code"]
         full_name = payload["full_name"]
+        full_name_kurdish = payload.get("full_name_kurdish")
         email = payload["email"]
         profile_photo_url = payload.get("profile_photo_url")
         course_id = payload["course_id"]
+        student_code = f"STU-{uuid.uuid4().hex[:8].upper()}"
 
         grades = payload.get("grades", {})
         grade_tuple: Tuple[Any, ...] = (
@@ -122,18 +258,20 @@ class Repository:
 
             cursor.execute(
                 """
-                INSERT INTO dbo.Students (StudentCode, FullName, Email, ProfilePhotoUrl)
+                INSERT INTO dbo.Students
+                    (StudentCode, FullName, FullNameKurdish, Email, ProfilePhotoUrl)
                 OUTPUT INSERTED.StudentID
-                VALUES (?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?);
                 """,
-                (student_code, full_name, email, profile_photo_url),
+                (student_code, full_name, full_name_kurdish, email, profile_photo_url),
             )
             student_id = cursor.fetchone()[0]
 
             cursor.execute(
                 """
                 INSERT INTO dbo.Enrollments
-                    (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade, AssignmentGrade, MidtermGrade, FinalExamGrade)
+                    (StudentID, CourseID, Quiz1, Quiz2, ProjectGrade,
+                     AssignmentGrade, MidtermGrade, FinalExamGrade)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (student_id, course_id, *grade_tuple),
@@ -199,7 +337,13 @@ class Repository:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE dbo.Students SET EnrollmentStatus = N'enrolled' WHERE StudentID = ?;",
+                """
+                UPDATE dbo.Students
+                SET EnrollmentStatus  = N'enrolled',
+                    FaceDeletedBySelf = 0,
+                    FaceDeletedAt     = NULL
+                WHERE StudentID = ?;
+                """,
                 (student_id,),
             )
             conn.commit()
@@ -216,8 +360,9 @@ class Repository:
     def list_course_students(course_id: int) -> List[Dict[str, Any]]:
         return fetch_all(
             """
-            SELECT s.StudentID, s.StudentCode, s.FullName, s.Email,
-                   ISNULL(s.EnrollmentStatus, N'pending') AS EnrollmentStatus
+            SELECT s.StudentID, s.StudentCode, s.FullName, s.FullNameKurdish, s.Email,
+                   ISNULL(s.EnrollmentStatus, N'pending') AS EnrollmentStatus,
+                   s.FaceDeletedBySelf, s.FaceDeletedAt
             FROM dbo.Students s
             INNER JOIN dbo.Enrollments e ON e.StudentID = s.StudentID
             WHERE e.CourseID = ? AND s.IsActive = 1
