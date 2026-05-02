@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ScanFace, CheckCircle2, Loader2, RefreshCw, Search } from 'lucide-react'
+import { ScanFace, CheckCircle2, Loader2, RefreshCw, Search, UserPlus, AlertTriangle, X } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
 import { tName } from '../../lib/nameTranslation';
 
@@ -38,6 +38,34 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
         s.StudentCode.toLowerCase().includes(search.toLowerCase())
       )
     : students
+
+  const [addModal, setAddModal] = useState(false)
+  const [addForm, setAddForm] = useState({ full_name: '', full_name_kurdish: '', email: '' })
+  const [addLoading, setAddLoading] = useState(false)
+  const [addError, setAddError] = useState('')
+  const [addSuccess, setAddSuccess] = useState('')
+
+  const handleAddStudent = async (e) => {
+    e.preventDefault()
+    setAddError('')
+    setAddSuccess('')
+    setAddLoading(true)
+    try {
+      await apiFetch(`/api/students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...addForm, course_id: courseId }),
+      })
+      setAddSuccess(t('add_student_invite_sent'))
+      setAddForm({ full_name: '', full_name_kurdish: '', email: '' })
+      await loadStudents()
+      setTimeout(() => { setAddModal(false); setAddSuccess('') }, 1500)
+    } catch (err) {
+      setAddError(err.message || 'Failed to add student.')
+    } finally {
+      setAddLoading(false)
+    }
+  }
 
   const enrolledCount = students.filter(s => s.EnrollmentStatus === 'enrolled').length
   const pendingCount = students.length - enrolledCount
@@ -81,6 +109,13 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+          <button
+            onClick={() => { setAddModal(true); setAddError(''); setAddSuccess('') }}
+            className="p-2 rounded-sm border border-border text-secondary hover:text-fg hover:bg-surface transition-colors cursor-pointer"
+            title={t('add_student_btn')}
+          >
+            <UserPlus size={14} />
+          </button>
         </div>
 
         {/* Student list — natural page scroll, no fixed height */}
@@ -98,6 +133,10 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
           ) : (
             filtered.map((student) => {
               const enrolled = student.EnrollmentStatus === 'enrolled'
+              const faceDeletedBySelf = Boolean(student.FaceDeletedBySelf)
+              const deletedAt = student.FaceDeletedAt
+                ? new Date(student.FaceDeletedAt).toLocaleDateString()
+                : ''
               return (
                 <div
                   key={student.StudentID}
@@ -107,12 +146,22 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                     <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center shrink-0 ${
                       enrolled
                         ? 'bg-green-500/10 text-green-500'
+                        : faceDeletedBySelf
+                        ? 'bg-red-500/10 text-red-500'
                         : 'bg-surface text-secondary'
                     }`}>
-                      {enrolled ? <CheckCircle2 size={16} /> : <ScanFace size={16} />}
+                      {enrolled ? <CheckCircle2 size={16} /> : faceDeletedBySelf ? <AlertTriangle size={16} /> : <ScanFace size={16} />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-fg truncate">{tName(student.FullName, language)}</p>
+                      {faceDeletedBySelf && !enrolled && (
+                        <p
+                          className="text-[11px] text-red-500 leading-tight"
+                          title={t('enroll_student_deleted_tooltip').replace('{date}', deletedAt)}
+                        >
+                          {t('enroll_student_deleted')}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -122,6 +171,8 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                       className={`relative min-w-[108px] px-3 sm:px-4 py-1.5 rounded-sm text-xs font-medium transition-all cursor-pointer whitespace-nowrap text-center ${
                         enrolled
                           ? 'group border border-green-500/40 text-green-500 hover:bg-fg hover:border-fg'
+                          : faceDeletedBySelf
+                          ? 'bg-red-500/10 border border-red-500/40 text-red-500 hover:bg-fg hover:border-fg hover:text-bg'
                           : 'bg-fg text-bg hover:opacity-80'
                       }`}
                     >
@@ -130,7 +181,11 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
                           <span className="transition-opacity duration-150 group-hover:opacity-0">{t('enroll_enrolled')}</span>
                           <span className="absolute inset-0 flex items-center justify-center text-bg opacity-0 transition-opacity duration-150 group-hover:opacity-100">{t('enroll_reenroll')}</span>
                         </>
-                      ) : t('enroll_add')}
+                      ) : faceDeletedBySelf ? (
+                        <span>{t('enroll_reenroll')}</span>
+                      ) : (
+                        t('enroll_add')
+                      )}
                     </button>
                   </div>
                 </div>
@@ -139,6 +194,89 @@ export function EnrollmentTab({ apiFetch, courseId, onEnrollStudent }) {
           )}
         </div>
       </div>
+
+      {/* Add Student Modal */}
+      {addModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-border rounded-sm w-full max-w-sm">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="text-sm font-semibold text-fg">{t('add_student_title')}</h3>
+              <button
+                onClick={() => setAddModal(false)}
+                className="text-secondary hover:text-fg transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleAddStudent} className="px-5 py-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-secondary mb-1.5">
+                  {t('add_student_name_en')} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={addForm.full_name}
+                  onChange={(e) => setAddForm(f => ({ ...f, full_name: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-bg border border-border rounded-sm text-fg placeholder:text-secondary/50 focus:outline-none focus:border-fg transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-secondary mb-1.5">
+                  {t('add_student_name_ku')}
+                </label>
+                <input
+                  type="text"
+                  value={addForm.full_name_kurdish}
+                  onChange={(e) => setAddForm(f => ({ ...f, full_name_kurdish: e.target.value }))}
+                  dir="rtl"
+                  className="w-full px-3 py-2 text-sm bg-bg border border-border rounded-sm text-fg placeholder:text-secondary/50 focus:outline-none focus:border-fg transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-secondary mb-1.5">
+                  {t('add_student_email')} *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={addForm.email}
+                  onChange={(e) => setAddForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-bg border border-border rounded-sm text-fg placeholder:text-secondary/50 focus:outline-none focus:border-fg transition-colors"
+                />
+              </div>
+
+              {addError && (
+                <p className="text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-sm px-3 py-2">
+                  {addError}
+                </p>
+              )}
+              {addSuccess && (
+                <p className="text-xs text-green-500 bg-green-500/10 border border-green-500/20 rounded-sm px-3 py-2">
+                  {addSuccess}
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAddModal(false)}
+                  className="flex-1 py-2 border border-border text-secondary text-sm rounded-sm hover:text-fg transition-colors cursor-pointer"
+                >
+                  {t('student_face_delete_cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={addLoading}
+                  className="flex-1 py-2 bg-fg text-bg text-sm font-medium rounded-sm hover:opacity-80 disabled:opacity-40 transition-opacity cursor-pointer"
+                >
+                  {addLoading ? '...' : t('add_student_submit')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
