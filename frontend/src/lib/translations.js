@@ -225,6 +225,43 @@ export const translations = {
     pose_cmd_right: "TURN RIGHT",
     pose_cmd_up: "LOOK UP",
     pose_cmd_down: "LOOK DOWN",
+
+    // Student portal
+    student_portal_title: 'Student Portal',
+    student_absence_title: 'My Attendance',
+    student_hours_absent: 'hrs absent',
+    student_face_id_title: 'Face ID',
+    student_face_active: 'Active',
+    student_face_deleted: 'Deleted',
+    student_face_not_enrolled: 'Not enrolled',
+    student_face_delete_btn: 'Delete Face ID',
+    student_face_delete_confirm_title: 'Delete your Face ID?',
+    student_face_delete_confirm_body: 'This will remove your face from all courses. Your professors will need to re-enroll you before you can be recognized in class.',
+    student_face_delete_contact_msg: 'Contact your course professors to re-enroll your Face ID.',
+    student_face_delete_confirm: 'Yes, delete',
+    student_face_delete_cancel: 'Cancel',
+    // Password setup
+    setup_password_title: 'Set up your password',
+    setup_password_subtitle: 'Choose a password to access your Attendify portal.',
+    setup_password_new: 'New password',
+    setup_password_confirm: 'Confirm password',
+    setup_password_submit: 'Set password & continue',
+    setup_password_mismatch: 'Passwords do not match.',
+    setup_password_too_short: 'Password must be at least 8 characters.',
+    // Add student modal
+    add_student_btn: 'Add Student',
+    add_student_title: 'Add New Student',
+    add_student_name_en: 'Full name (English)',
+    add_student_name_ku: 'Full name (Kurdish)',
+    add_student_email: 'Email address',
+    add_student_invite_sent: 'Student added — invite email sent.',
+    add_student_submit: 'Add & Send Invite',
+    // Enrollment page — face deleted badge
+    enroll_student_deleted: 'Student deleted',
+    enroll_student_deleted_tooltip: 'Student deleted their Face ID on {date}',
+    // Login
+    login_username_or_email: 'Username or Email',
+    login_account_not_setup: 'Your account is not set up yet. Check your email for the setup link.',
   },
   ckb: {
     // Navigation & Common
@@ -452,5 +489,42 @@ export const translations = {
     pose_cmd_right: "بەرەوڕاست بچۆرەوە",
     pose_cmd_up: "سەرەوە سەیر بکە",
     pose_cmd_down: "خوارەوە سەیر بکە",
+
+    // Student portal
+    student_portal_title: 'پۆرتاڵی خوێندکار',
+    student_absence_title: 'ئامادەبوونەکەم',
+    student_hours_absent: 'کاتژمێر نەبووە',
+    student_face_id_title: 'ناسنامەی ڕووخسار',
+    student_face_active: 'چالاک',
+    student_face_deleted: 'سڕایەوە',
+    student_face_not_enrolled: 'تۆمار نەکراوە',
+    student_face_delete_btn: 'سڕینەوەی ناسنامەی ڕووخسار',
+    student_face_delete_confirm_title: 'ناسنامەی ڕووخسارەکەت بسڕیتەوە؟',
+    student_face_delete_confirm_body: 'ئەمە ڕووخسارەکەت لە هەموو وانەکان دەسڕێتەوە. مامۆستاکانت دەبێت دووبارە تۆمارت بکەن پێش ئەوەی لە پۆلدا بناسرێیت.',
+    student_face_delete_contact_msg: 'پەیوەندی بکە بە مامۆستاکانی وانەکانت بۆ دووبارە تۆمارکردنی ناسنامەی ڕووخسارەکەت.',
+    student_face_delete_confirm: 'بەڵێ، بیسڕەوە',
+    student_face_delete_cancel: 'پاشگەزبوونەوە',
+    // Password setup
+    setup_password_title: 'وشەی نهێنیەکەت دابنێ',
+    setup_password_subtitle: 'وشەیەکی نهێنی هەڵبژێرە بۆ دەستگەیشتن بە پۆرتاڵی ئەتێندیفایەکەت.',
+    setup_password_new: 'وشەی نهێنی نوێ',
+    setup_password_confirm: 'پشتڕاستکردنەوەی وشەی نهێنی',
+    setup_password_submit: 'دانانی وشەی نهێنی و بەردەوامبوون',
+    setup_password_mismatch: 'وشەکانی نهێنی یەکسان نین.',
+    setup_password_too_short: 'وشەی نهێنی دەبێت لانی کەم ٨ پیت بێت.',
+    // Add student modal
+    add_student_btn: 'خوێندکار زیاد بکە',
+    add_student_title: 'خوێندکاری نوێ زیاد بکە',
+    add_student_name_en: 'ناوی تەواو (ئینگلیزی)',
+    add_student_name_ku: 'ناوی تەواو (کوردی)',
+    add_student_email: 'ئیمەیڵ',
+    add_student_invite_sent: 'خوێندکار زیادکرا — ئیمەیڵی بانگهێشت نێردرا.',
+    add_student_submit: 'زیادکردن و ناردنی بانگهێشت',
+    // Enrollment page — face deleted badge
+    enroll_student_deleted: 'خوێندکار سڕیەوە',
+    enroll_student_deleted_tooltip: 'خوێندکار ناسنامەی ڕووخسارییەکەی سڕیەوە لە {date}',
+    // Login
+    login_username_or_email: 'ناوی بەکارهێنەر یان ئیمەیڵ',
+    login_account_not_setup: 'ئەکاونتەکەت هێشتا دانەنراوە. ئیمەیڵەکەت بپشکنە بۆ لینکی دامەزراندن.',
   }
 };
