@@ -53,7 +53,11 @@ export function useApi() {
                     localStorage.removeItem('ams_professor')
                     window.location.reload()
                 }
-                throw new Error(data?.detail || data?.message || text || `HTTP ${response.status}`)
+                const detail = data?.detail
+                const detailStr = Array.isArray(detail)
+                    ? detail.map(e => e.msg || JSON.stringify(e)).join(', ')
+                    : typeof detail === 'string' ? detail : null
+                throw new Error(detailStr || data?.message || text || `HTTP ${response.status}`)
             }
             return data
         },
